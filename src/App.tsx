@@ -296,15 +296,29 @@ export function App() {
         isDark ? 'bg-[#141414] text-[#E0E0E0]' : 'bg-[#ECEEF1] text-[#111827]'
       }`}
     >
-      {/* 1. Windows 11 Fluent Clean TitleBar */}
+      {/* 1. Authentic Picasa 3 Top Bar with Menu & Dropdowns */}
       <TitleBar
         searchQuery={searchQuery}
         onSearchChange={setSearchQuery}
         isDark={isDark}
         onToggleTheme={toggleTheme}
+        onTriggerScan={handleTriggerScan}
+        onClearCatalog={handleClearCatalog}
+        onSelectAllPhotos={() => {
+          setSelectedFolderId(null);
+          setSelectedCharacter(null);
+        }}
+        onSortChange={setSortBy}
+        sortBy={sortBy}
+        totalPhotos={media.length}
+        totalFolders={folders.length}
+        selectedMedia={selectedMedia}
+        onOpenViewer={() => {
+          if (visibleMedia.length > 0) setSelectedMedia(visibleMedia[0]);
+        }}
       />
 
-      {/* 2. Secondary Filter Bar */}
+      {/* 2. Secondary Filter & Status Bar */}
       <HeaderBar
         title={currentTitle}
         totalVisible={visibleMedia.length}
@@ -315,24 +329,9 @@ export function App() {
         isDark={isDark}
       />
 
-      {/* 3. Main Workspace: Gallery + Sidebar */}
+      {/* 3. Main Workspace: LEFT Sidebar + RIGHT Gallery */}
       <div className="flex-1 flex overflow-hidden relative">
-        {/* Main Content Gallery */}
-        <main
-          className={`flex-1 flex flex-col h-full overflow-hidden transition-colors ${
-            isDark ? 'bg-[#141414]' : 'bg-[#ECEEF1]'
-          }`}
-        >
-          <VirtualGallery
-            items={visibleMedia}
-            folders={folders}
-            onSelectMedia={(item) => setSelectedMedia(item)}
-            onToggleSync={handleToggleSync}
-            isDark={isDark}
-          />
-        </main>
-
-        {/* Right Folder Tree Sidebar */}
+        {/* Left Folder Tree Sidebar (Picasa 3 Style) */}
         <FolderSidebar
           folders={folders}
           characters={characters}
@@ -352,6 +351,21 @@ export function App() {
           isScanning={isScanning}
           isDark={isDark}
         />
+
+        {/* Main Content Gallery */}
+        <main
+          className={`flex-1 flex flex-col h-full overflow-hidden transition-colors ${
+            isDark ? 'bg-[#141414]' : 'bg-[#ECEEF1]'
+          }`}
+        >
+          <VirtualGallery
+            items={visibleMedia}
+            folders={folders}
+            onSelectMedia={(item) => setSelectedMedia(item)}
+            onToggleSync={handleToggleSync}
+            isDark={isDark}
+          />
+        </main>
 
         {/* Sticking Real-time Preview Notification Card */}
         {scanningPreview && (
