@@ -6,10 +6,11 @@ import { Image as ImageIcon } from 'lucide-react';
 interface ImageCellProps {
   media: MediaRecord;
   onSelect: (media: MediaRecord) => void;
+  onContextMenu?: (e: React.MouseEvent, media: MediaRecord) => void;
   isDark?: boolean;
 }
 
-export const ImageCell: React.FC<ImageCellProps> = memo(({ media, onSelect, isDark = false }) => {
+export const ImageCell: React.FC<ImageCellProps> = memo(({ media, onSelect, onContextMenu, isDark = false }) => {
   // CRITICAL: NEVER load 20MB raw original camera files in the gallery view!
   // ONLY load the 256px thumbnail (6-12KB) from disk cache.
   const [thumbSrc, setThumbSrc] = useState<string | null>(() => {
@@ -58,9 +59,18 @@ export const ImageCell: React.FC<ImageCellProps> = memo(({ media, onSelect, isDa
     onSelect(media);
   }, [media, onSelect]);
 
+  const handleContextMenu = useCallback((e: React.MouseEvent) => {
+    if (onContextMenu) {
+      e.preventDefault();
+      e.stopPropagation();
+      onContextMenu(e, media);
+    }
+  }, [media, onContextMenu]);
+
   return (
     <div
       onClick={handleClick}
+      onContextMenu={handleContextMenu}
       title={`${media.file_name} (${media.width || '?'}×${media.height || '?'})`}
       style={{
         height: '170px',

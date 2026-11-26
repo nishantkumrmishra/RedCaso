@@ -1,5 +1,5 @@
-import { useState, useEffect, useMemo, useCallback } from 'react';
-import { invoke, convertFileSrc } from '@tauri-apps/api/core';
+import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
+import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import {
   FolderRecord,
@@ -7,89 +7,85 @@ import {
   CharacterRecord,
   ScanProgressPayload,
   FolderScannedPayload,
-  SyncProgressPayload,
+  FaceScanProgressPayload,
 } from './types';
-import { TitleBar } from './components/TitleBar';
-import { HeaderBar } from './components/HeaderBar';
-import { FolderSidebar } from './components/FolderSidebar';
-import { VirtualGallery } from './components/VirtualGallery';
+import { ModernTopBar } from './components/ModernTopBar';
+import { ModernSidebar } from './components/ModernSidebar';
+import { ModernGallery } from './components/ModernGallery';
+import { PhotoDetailsPane } from './components/PhotoDetailsPane';
+import { ModernToast } from './components/ModernToast';
+import { ModernStatusBar } from './components/ModernStatusBar';
+import { PeopleView } from './components/PeopleView';
 import { PhotoViewer } from './components/PhotoViewer';
-import { Sparkles } from 'lucide-react';
+import { SettingsModal } from './components/SettingsModal';
+import { useFluentDialog } from './components/FluentDialog';
 
-export function App() {
+export default function App() {
   const [folders, setFolders] = useState<FolderRecord[]>([]);
   const [media, setMedia] = useState<MediaRecord[]>([]);
   const [characters, setCharacters] = useState<CharacterRecord[]>([]);
   const [selectedFolderId, setSelectedFolderId] = useState<number | null>(null);
   const [selectedCharacter, setSelectedCharacter] = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState<'photos' | 'recently' | 'favorites' | 'people'>('photos');
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [sortBy, setSortBy] = useState<'date' | 'name' | 'size'>('date');
   const [isScanning, setIsScanning] = useState<boolean>(false);
-  const [scanProgress, setScanProgress] = useState<ScanProgressPayload | null>(null);
-  const [syncProgress, setSyncProgress] = useState<SyncProgressPayload | null>(null);
+
+  // Selected photo for Right Inspector pane
   const [selectedMedia, setSelectedMedia] = useState<MediaRecord | null>(null);
+  // Fullscreen Lightbox PhotoViewer & Editor
+  const [viewerMedia, setViewerMedia] = useState<MediaRecord | null>(null);
+  // Inspector toggle
+  const [isDetailsOpen, setIsDetailsOpen] = useState<boolean>(false);
+  // Settings Modal
+  const [isSettingsOpen, setIsSettingsOpen] = useState<boolean>(false);
 
-  // Device/System Theme Detection (Defaulting to Light mode matching Windows 11 device state)
-  const [isDark, setIsDark] = useState<boolean>(() => {
-    const saved = localStorage.getItem('redcaso_theme');
-    if (saved === 'dark') return true;
-    if (saved === 'light') return false;
-    if (typeof window !== 'undefined' && window.matchMedia) {
-      return window.matchMedia('(prefers-color-scheme: dark)').matches;
-    }
-    return false; // Default to Light Mode!
-  });
+  // Face recognition stats
+  const [faceCount, setFaceCount] = useState<number>(0);
+  const [facePercentage, setFacePercentage] = useState<number>(100);
 
-  const toggleTheme = useCallback(() => {
-    setIsDark((prev) => {
-      const next = !prev;
-      localStorage.setItem('redcaso_theme', next ? 'dark' : 'light');
-      return next;
-    });
-  }, []);
+  // Dialog hook
+  const { prompt } = useFluentDialog();
 
-  // Listen to OS system theme changes if not manually set
-  useEffect(() => {
-    const mql = window.matchMedia('(prefers-color-scheme: dark)');
-    const handler = (e: MediaQueryListEvent) => {
-      if (!localStorage.getItem('redcaso_theme')) {
-        setIsDark(e.matches);
-      }
-    };
-    mql.addEventListener('change', handler);
-    return () => mql.removeEventListener('change', handler);
-  }, []);
-
-  // Sticking preview card for photos scanned in real time (Picasa Photo Detector style)
-  const [scanningPreview, setScanningPreview] = useState<{
-    imagePath: string;
-    imageName: string;
-    folderName: string;
-    photoCount: number;
+  // Floating Toast Notification (Starts null, only shows on real events)
+  const [toastNotification, setToastNotification] = useState<{
+    title: string;
+    description: string;
+    actionLabel?: string;
+    onAction?: () => void;
   } | null>(null);
 
-  // Load initial catalog
+  // Fetch catalog from backend
   const loadCatalog = useCallback(async () => {
     try {
-      const [loadedFolders, loadedChars] = await Promise.all([
+      const [fetchedFolders, fetchedCharacters] = await Promise.all([
         invoke<FolderRecord[]>('get_folders'),
         invoke<CharacterRecord[]>('get_characters'),
       ]);
-      setFolders(loadedFolders);
-      setCharacters(loadedChars);
+      if (fetchedFolders) {
+        setFolders(fetchedFolders);
+      }
+      if (fetchedCharacters) {
+        setCharacters(fetchedCharacters);
+      }
     } catch (err) {
       console.error('Failed to load catalog:', err);
     }
   }, []);
 
-  // Load media items for the selected view
   const loadMedia = useCallback(async () => {
     try {
-      const items = await invoke<MediaRecord[]>('get_media', {
+      const fetchedMedia = await invoke<MediaRecord[]>('get_media', {
         folderId: selectedFolderId,
-        characterTag: selectedCharacter,
+        characterTag: selectedCharacter === '__unnamed__' ? null : selectedCharacter,
       });
-      setMedia(items);
+      if (fetchedMedia) {
+        setMedia(fetchedMedia);
+        setSelectedMedia((prev) => {
+          if (prev && fetchedMedia.some((m) => m.id === prev.id)) return prev;
+          return fetchedMedia.length > 0 ? fetchedMedia[0] : null;
+        });
+      }
     } catch (err) {
       console.error('Failed to load media:', err);
     }
@@ -103,6 +99,36 @@ export function App() {
     loadMedia();
   }, [loadMedia]);
 
+  // Debounced loadMedia to prevent IPC floods when streaming scanned folders
+  const loadMediaDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const debouncedLoadMedia = useCallback(() => {
+    if (loadMediaDebounceRef.current) {
+      clearTimeout(loadMediaDebounceRef.current);
+    }
+    loadMediaDebounceRef.current = setTimeout(() => {
+      loadMedia();
+    }, 350);
+  }, [loadMedia]);
+
+  // Real-time face recognition stats
+  useEffect(() => {
+    invoke<FaceScanProgressPayload>('get_face_scan_stats')
+      .then((stats) => {
+        setFaceCount(stats.faces_found);
+        setFacePercentage(stats.percentage || 100);
+      })
+      .catch(() => {});
+
+    const unlistenPromise = listen<FaceScanProgressPayload>('face_scan_progress', (e) => {
+      setFaceCount(e.payload.faces_found);
+      setFacePercentage(e.payload.percentage);
+    });
+
+    return () => {
+      unlistenPromise.then((u) => u());
+    };
+  }, []);
+
   // Real-time incremental streaming of scanned folders
   useEffect(() => {
     const unlistenFolderScanned = listen<FolderScannedPayload>(
@@ -111,7 +137,6 @@ export function App() {
         setIsScanning(true);
         const payload = event.payload;
 
-        // 1. Immediately insert folder into sidebar
         setFolders((prev) => {
           const index = prev.findIndex((f) => f.id === payload.folder_id);
           const newFolder: FolderRecord = {
@@ -131,83 +156,66 @@ export function App() {
           return [...prev, newFolder];
         });
 
-        // 2. Refresh media catalog
-        loadMedia();
+        debouncedLoadMedia();
 
-        // 3. Trigger sticking desktop notification preview
-        setScanningPreview({
-          imagePath: payload.preview_image_path,
-          imageName: payload.preview_image_name,
-          folderName: payload.folder_name,
-          photoCount: payload.photo_count,
+        setToastNotification({
+          title: 'Folder scan complete',
+          description: `Added ${payload.photo_count} photos from ${payload.folder_name}.`,
+          actionLabel: 'View photos',
+          onAction: () => {
+            setSelectedFolderId(payload.folder_id);
+            setActiveTab('photos');
+          },
         });
-
-        // Clear preview notification after 3.5s
-        setTimeout(() => {
-          setScanningPreview((current) =>
-            current?.imagePath === payload.preview_image_path ? null : current
-          );
-        }, 3500);
       }
     );
 
-    const unlistenScanComplete = listen<ScanProgressPayload>(
-      'scan_complete',
-      () => {
-        setIsScanning(false);
-        loadCatalog();
-        loadMedia();
-      }
-    );
-
-    const unlistenSyncProgress = listen<SyncProgressPayload>(
-      'sync_progress',
+    const unlistenScanProgress = listen<ScanProgressPayload>(
+      'scan_progress',
       (event) => {
-        setSyncProgress(event.payload);
+        if (event.payload.status === 'complete') {
+          setIsScanning(false);
+          loadCatalog();
+          loadMedia();
+        } else {
+          setIsScanning(true);
+        }
       }
     );
 
     return () => {
-      unlistenFolderScanned.then((fn) => fn());
-      unlistenScanComplete.then((fn) => fn());
-      unlistenSyncProgress.then((fn) => fn());
+      unlistenFolderScanned.then((unlisten) => unlisten());
+      unlistenScanProgress.then((unlisten) => unlisten());
     };
   }, [loadCatalog, loadMedia]);
 
-  // Scan triggers
-  const handleTriggerScan = async () => {
-    if (isScanning) return;
-    setIsScanning(true);
-    setScanProgress({
-      status: 'Scanning Windows PC drives...',
-      current_folder: 'Discovering...',
-      folders_found: 0,
-      images_found: 0,
-    });
-
+  // Trigger Paced Scan of PC Drives
+  const handleTriggerScan = async (customPath?: string) => {
     try {
-      const defaultPaths = await invoke<string[]>('get_default_scan_paths');
-      await invoke('scan_directories', { roots: defaultPaths });
+      setIsScanning(true);
+      let paths: string[] = [];
+      if (customPath) {
+        paths = [customPath];
+      } else {
+        paths = await invoke<string[]>('get_default_scan_paths');
+      }
+      await invoke('scan_directories', { roots: paths });
     } catch (err) {
-      console.error('Scan failed to trigger:', err);
+      console.error('Scan trigger error:', err);
       setIsScanning(false);
     }
   };
 
-  // Google Photos Sync toggle
-  const handleToggleSync = async (folderId: number, currentEnabled: boolean) => {
-    try {
-      const nextState = !currentEnabled;
-      setFolders((prev) =>
-        prev.map((f) => (f.id === folderId ? { ...f, sync_enabled: nextState } : f))
-      );
-      await invoke('toggle_folder_sync', {
-        folderId,
-        enabled: nextState,
-      });
-    } catch (err) {
-      console.error('Failed to toggle sync:', err);
-      loadCatalog();
+  // Add folder prompt using Fluent Dialog
+  const handleAddFolder = async () => {
+    const inputPath = await prompt({
+      title: 'Index Folder',
+      message: 'Enter the absolute path of the folder to index and monitor for photos:',
+      placeholder: 'C:\\Users\\...\\Pictures',
+      confirmLabel: 'Add Folder',
+    });
+    if (inputPath && inputPath.trim()) {
+      handleTriggerScan(inputPath.trim());
     }
   };
 
@@ -227,27 +235,6 @@ export function App() {
       );
     } catch (err) {
       console.error('Failed to assign character:', err);
-    }
-  };
-
-  // Developer Mode: Clear database
-  const handleClearCatalog = async () => {
-    if (
-      window.confirm(
-        'Developer Mode: Are you sure you want to reset and clear all indexed folders and photos?'
-      )
-    ) {
-      try {
-        await invoke('clear_catalog');
-        setSelectedFolderId(null);
-        setSelectedCharacter(null);
-        setSelectedMedia(null);
-        setFolders([]);
-        setMedia([]);
-        setCharacters([]);
-      } catch (err) {
-        console.error('Failed to clear catalog:', err);
-      }
     }
   };
 
@@ -279,145 +266,177 @@ export function App() {
     return result;
   }, [media, searchQuery, sortBy]);
 
-  const currentTitle = useMemo(() => {
-    if (selectedFolderId !== null) {
-      const f = folders.find((item) => item.id === selectedFolderId);
-      return f ? f.folder_name : 'Selected Folder';
-    }
-    if (selectedCharacter !== null) {
-      return `Person: ${selectedCharacter}`;
-    }
-    return 'All Photos';
-  }, [selectedFolderId, selectedCharacter, folders]);
-
   return (
-    <div
-      className={`h-screen w-screen flex flex-col font-sans select-none overflow-hidden transition-colors ${
-        isDark ? 'bg-[#141414] text-[#E0E0E0]' : 'bg-[#ECEEF1] text-[#111827]'
-      }`}
-    >
-      {/* 1. Authentic Picasa 3 Top Bar with Menu & Dropdowns */}
-      <TitleBar
+    <div className="h-screen w-screen flex flex-col select-none overflow-hidden bg-[#FAFAFA] text-[#242424]">
+      {/* 1. Top Bar & Search */}
+      <ModernTopBar
         searchQuery={searchQuery}
         onSearchChange={setSearchQuery}
-        isDark={isDark}
-        onToggleTheme={toggleTheme}
-        onTriggerScan={handleTriggerScan}
-        onClearCatalog={handleClearCatalog}
-        onSelectAllPhotos={() => {
-          setSelectedFolderId(null);
-          setSelectedCharacter(null);
+        onTriggerScan={() => handleTriggerScan()}
+        onFindFaces={() => {
+          setActiveTab('people');
+          invoke('trigger_face_rescan').catch(() => {});
         }}
-        onSortChange={setSortBy}
-        sortBy={sortBy}
-        totalPhotos={media.length}
-        totalFolders={folders.length}
-        selectedMedia={selectedMedia}
-        onOpenViewer={() => {
-          if (visibleMedia.length > 0) setSelectedMedia(visibleMedia[0]);
-        }}
+        isScanning={isScanning}
+        onAddFolder={handleAddFolder}
+        onOpenInfo={() => setIsSettingsOpen(true)}
       />
 
-      {/* 2. Secondary Filter & Status Bar */}
-      <HeaderBar
-        title={currentTitle}
-        totalVisible={visibleMedia.length}
-        scanProgress={scanProgress}
-        syncProgress={syncProgress}
-        sortBy={sortBy}
-        onSortChange={setSortBy}
-        isDark={isDark}
-      />
-
-      {/* 3. Main Workspace: LEFT Sidebar + RIGHT Gallery */}
+      {/* 2. Workspace: Sidebar + Full-Area Canvas + Right Inspector */}
       <div className="flex-1 flex overflow-hidden relative">
-        {/* Left Folder Tree Sidebar (Picasa 3 Style) */}
-        <FolderSidebar
+        {/* Navigation Sidebar (Standard Layout) */}
+        <ModernSidebar
+          activeTab={activeTab}
+          onSelectTab={(tab) => {
+            setActiveTab(tab);
+            if (tab !== 'photos') {
+              setSelectedFolderId(null);
+              setSelectedCharacter(null);
+            }
+          }}
           folders={folders}
-          characters={characters}
           selectedFolderId={selectedFolderId}
-          selectedCharacter={selectedCharacter}
           onSelectFolder={(id) => {
             setSelectedFolderId(id);
             setSelectedCharacter(null);
+            setActiveTab('photos');
           }}
-          onSelectCharacter={(name) => {
-            setSelectedCharacter(name);
-            setSelectedFolderId(null);
-          }}
-          onToggleSync={handleToggleSync}
-          onTriggerScan={handleTriggerScan}
-          onClearCatalog={handleClearCatalog}
+          totalPhotos={media.length}
+          totalPeople={faceCount}
           isScanning={isScanning}
-          isDark={isDark}
+          onTriggerScan={() => handleTriggerScan()}
+          onAddFolder={handleAddFolder}
+          onOpenSettings={() => setIsSettingsOpen(true)}
+          faceCount={faceCount}
+          facePercentage={facePercentage}
+          isFaceScanning={facePercentage < 100 && media.length > 0}
         />
 
-        {/* Main Content Gallery */}
-        <main
-          className={`flex-1 flex flex-col h-full overflow-hidden transition-colors ${
-            isDark ? 'bg-[#141414]' : 'bg-[#ECEEF1]'
-          }`}
-        >
-          <VirtualGallery
-            items={visibleMedia}
-            folders={folders}
-            onSelectMedia={(item) => setSelectedMedia(item)}
-            onToggleSync={handleToggleSync}
-            isDark={isDark}
-          />
+        {/* Main Content Area: Fills 100% of remaining width */}
+        <main className="flex-1 flex flex-col h-full overflow-hidden relative bg-white">
+          {activeTab === 'people' ? (
+            <PeopleView
+              items={media}
+              characters={characters}
+              onSaveCharacter={handleSaveCharacter}
+              onSelectMedia={(item) => {
+                setSelectedMedia(item);
+              }}
+              isScanning={isScanning}
+              isDark={false}
+            />
+          ) : (
+            <ModernGallery
+              media={visibleMedia}
+              folders={folders}
+              characters={characters}
+              unnamedFaceCount={faceCount}
+              title={
+                selectedFolderId
+                  ? folders.find((f) => f.id === selectedFolderId)?.folder_name || 'Folder photos'
+                  : selectedCharacter
+                  ? `Photos of ${selectedCharacter}`
+                  : 'All photos'
+              }
+              subtitle={
+                selectedFolderId
+                  ? folders.find((f) => f.id === selectedFolderId)?.folder_path || ''
+                  : 'Your memories, together in one place.'
+              }
+              selectedFolderId={selectedFolderId}
+              onSelectFolder={setSelectedFolderId}
+              selectedMedia={selectedMedia}
+              onSelectMedia={(photo) => {
+                setSelectedMedia(photo);
+              }}
+              onOpenViewer={(photo) => setViewerMedia(photo)}
+              sortBy={sortBy}
+              onSortChange={setSortBy}
+              isDetailsOpen={isDetailsOpen}
+              onToggleDetails={() => {
+                if (!isDetailsOpen && !selectedMedia && visibleMedia.length > 0) {
+                  setSelectedMedia(visibleMedia[0]);
+                }
+                setIsDetailsOpen(!isDetailsOpen);
+              }}
+              onOpenPeopleView={() => setActiveTab('people')}
+              onSelectCharacter={(name) => {
+                setSelectedCharacter(name);
+                setActiveTab('photos');
+              }}
+              onRefresh={() => {
+                loadCatalog();
+                loadMedia();
+              }}
+            />
+          )}
         </main>
 
-        {/* Sticking Real-time Preview Notification Card */}
-        {scanningPreview && (
-          <div
-            className={`absolute bottom-4 right-4 z-50 w-72 backdrop-blur-md border shadow-2xl p-2.5 flex items-center space-x-3 animate-in fade-in slide-in-from-bottom-3 duration-200 ${
-              isDark
-                ? 'bg-[#202020]/95 border-[#0078D4] text-white'
-                : 'bg-white/95 border-[#0078D4] text-[#111827]'
-            }`}
-          >
-            <div className="w-12 h-12 overflow-hidden bg-[#E5E7EB] border border-[#D1D5DB] shrink-0 flex items-center justify-center">
-              <img
-                src={convertFileSrc(scanningPreview.imagePath)}
-                alt={scanningPreview.imageName}
-                className="w-full h-full object-cover"
-              />
-            </div>
+        {/* Right-Hand Split Pane: Photo Details Inspector (Width 320px) */}
+        {isDetailsOpen && activeTab !== 'people' && (
+          <PhotoDetailsPane
+            photo={selectedMedia}
+            onClose={() => setIsDetailsOpen(false)}
+            onOpenViewer={(photo) => setViewerMedia(photo)}
+            onRefresh={() => {
+              loadCatalog();
+              loadMedia();
+            }}
+          />
+        )}
 
-            <div className="flex-1 min-w-0 text-left">
-              <div className="flex items-center space-x-1.5 text-[10px] text-[#0078D4] font-semibold uppercase tracking-wider mb-0.5">
-                <Sparkles size={11} className="text-[#0078D4] animate-pulse" />
-                <span>Found New Folder</span>
-              </div>
-              <div
-                className={`text-xs font-semibold truncate ${
-                  isDark ? 'text-white' : 'text-[#111827]'
-                }`}
-                title={scanningPreview.folderName}
-              >
-                {scanningPreview.folderName} ({scanningPreview.photoCount})
-              </div>
-              <div className="text-[10px] text-[#6B7280] truncate font-mono mt-0.5">
-                {scanningPreview.imageName}
-              </div>
-            </div>
-          </div>
+        {/* Floating Notification Toast */}
+        {toastNotification && (
+          <ModernToast
+            title={toastNotification.title}
+            description={toastNotification.description}
+            primaryActionLabel={toastNotification.actionLabel || 'Review'}
+            onPrimaryAction={() => {
+              if (toastNotification.onAction) {
+                toastNotification.onAction();
+              } else {
+                setActiveTab('people');
+              }
+              setToastNotification(null);
+            }}
+            onDismiss={() => setToastNotification(null)}
+          />
         )}
       </div>
 
-      {/* 4. Full Picasa Photo Viewer & Editor */}
-      {selectedMedia && (
+      {/* 3. Bottom Status Bar (Height 28px) */}
+      <ModernStatusBar
+        totalPhotos={media.length}
+        totalFolders={folders.length}
+        selectedCount={selectedMedia ? 1 : 0}
+        visibleCount={visibleMedia.length}
+        isScanning={isScanning}
+        facePercentage={facePercentage}
+      />
+
+      {/* 4. Fullscreen Photo Viewer & Editor Lightbox */}
+      {viewerMedia && (
         <PhotoViewer
-          media={selectedMedia}
+          media={viewerMedia}
           items={visibleMedia}
-          onSelectMedia={(item) => setSelectedMedia(item)}
-          onClose={() => setSelectedMedia(null)}
+          onSelectMedia={(target) => setViewerMedia(target)}
+          onClose={() => setViewerMedia(null)}
           onSaveCharacter={handleSaveCharacter}
-          isDark={isDark}
+          isDark={false}
         />
       )}
+
+      {/* 5. Settings Modal */}
+      <SettingsModal
+        isOpen={isSettingsOpen}
+        onClose={() => setIsSettingsOpen(false)}
+        folders={folders}
+        onAddFolder={handleAddFolder}
+        onRefresh={() => {
+          loadCatalog();
+          loadMedia();
+        }}
+      />
     </div>
   );
 }
-
-export default App;

@@ -1,12 +1,14 @@
-import React, { useState, useMemo, useCallback } from 'react';
-import { FolderRecord, CharacterRecord } from '../types';
+import React, { useState, useMemo, useCallback, useEffect } from 'react';
+import { FolderRecord, CharacterRecord, FaceScanProgressPayload } from '../types';
+import { useFluentDialog } from './FluentDialog';
+import { invoke } from '@tauri-apps/api/core';
+import { listen } from '@tauri-apps/api/event';
 import {
   Folder,
   FolderOpen,
   HardDrive,
   RefreshCw,
   User,
-  Cloud,
   Trash2,
   Code,
   Search,
@@ -14,7 +16,12 @@ import {
   BookMarked,
   HelpCircle,
   ChevronUp,
+  Sparkles,
+  ExternalLink,
+  Copy,
+  Edit3,
 } from 'lucide-react';
+import { ContextMenu, ContextMenuItem } from './ContextMenu';
 
 interface FolderSidebarProps {
   folders: FolderRecord[];
@@ -26,6 +33,7 @@ interface FolderSidebarProps {
   onToggleSync: (folderId: number, currentEnabled: boolean) => void;
   onTriggerScan: () => void;
   onClearCatalog: () => void;
+  onRefreshCatalog?: () => void;
   isScanning: boolean;
   isDark?: boolean;
 }
@@ -148,9 +156,9 @@ const GreenCircleBadge: React.FC<{ expanded: boolean }> = ({ expanded }) => (
 const BlueTriangleExpander: React.FC<{ expanded: boolean }> = ({ expanded }) => (
   <svg width="10" height="10" viewBox="0 0 12 12" className="shrink-0">
     {expanded ? (
-      <polygon points="2,3.5 10,3.5 6,8.5" fill="#1565C0" />
+      <polygon points="2,3 10,3 6,9" fill="#0078D4" />
     ) : (
-      <polygon points="3.5,2 9,6 3.5,10" fill="none" stroke="#1565C0" strokeWidth="1.8" />
+      <polygon points="3,2 9,6 3,10" fill="#0078D4" />
     )}
   </svg>
 );
@@ -164,13 +172,130 @@ export const FolderSidebar: React.FC<FolderSidebarProps> = ({
   onSelectCharacter,
   onTriggerScan,
   onClearCatalog,
+  onRefreshCatalog,
   isScanning,
   isDark = false,
 }) => {
-  const totalPhotos = useMemo(() => folders.reduce((sum, f) => sum + f.photo_count, 0), [folders]);
+  const { confirm, prompt } = useFluentDialog();
   const treeRoots = useMemo(() => buildFolderTree(folders), [folders]);
 
   const [filterQuery, setFilterQuery] = useState<string>('');
+  const [faceScanPct, setFaceScanPct] = useState<number>(0);
+
+  const [contextMenu, setContextMenu] = useState<{
+    x: number;
+    y: number;
+    folderNode?: FolderTreeNode;
+    character?: CharacterRecord;
+  } | null>(null);
+
+  const contextMenuItems: ContextMenuItem[] = useMemo(() => {
+    if (!contextMenu) return [];
+    if (contextMenu.folderNode) {
+      const node = contextMenu.folderNode;
+      const isComputer = node.id === 'my-computer';
+      if (isComputer) {
+        return [
+          {
+            label: 'Scan PC Drives (C:, D:, E:)',
+            icon: <Sparkles size={13} />,
+            onClick: onTriggerScan,
+          },
+        ];
+      }
+
+      return [
+        {
+          label: 'Open in File Explorer',
+          icon: <ExternalLink size={13} />,
+          onClick: () => {
+            invoke('open_folder_in_explorer', { folderPath: node.fullPath }).catch(console.error);
+          },
+        },
+        {
+          label: 'Copy Folder Path',
+          icon: <Copy size={13} />,
+          onClick: () => {
+            navigator.clipboard.writeText(node.fullPath);
+          },
+        },
+        { separator: true },
+        {
+          label: 'Rescan Drives',
+          icon: <RefreshCw size={13} />,
+          onClick: onTriggerScan,
+        },
+      ];
+    } else if (contextMenu.character) {
+      const char = contextMenu.character;
+      return [
+        {
+          label: `View Photos of ${char.name}`,
+          icon: <User size={13} />,
+          onClick: () => {
+            onSelectFolder(null);
+            onSelectCharacter(char.name);
+          },
+        },
+        {
+          label: 'Rename Person...',
+          icon: <Edit3 size={13} />,
+          onClick: async () => {
+            const newName = await prompt({ title: "Rename Tag", message: `Rename "${char.name}" across library:`, defaultValue: char.name, confirmLabel: "Rename" });
+            if (newName && newName.trim() && newName.trim() !== char.name) {
+              try {
+                await invoke('rename_character', {
+                  oldName: char.name,
+                  newName: newName.trim(),
+                });
+                onRefreshCatalog?.();
+              } catch (e) {
+                console.error('Rename failed:', e);
+              }
+            }
+          },
+        },
+        { separator: true },
+        {
+          label: 'Delete Person Tag',
+          icon: <Trash2 size={13} />,
+          danger: true,
+          onClick: async () => {
+            const ok = await confirm({ title: "Delete Tag", message: `Delete tag "${char.name}"? This removes the tag from all ${char.count} photos.`, confirmLabel: "Delete Tag", isDestructive: true });
+    if (ok) {
+              try {
+                await invoke('delete_character', { characterName: char.name });
+                if (selectedCharacter === char.name) {
+                  onSelectCharacter(null);
+                }
+                onRefreshCatalog?.();
+              } catch (e) {
+                console.error('Delete character tag failed:', e);
+              }
+            }
+          },
+        },
+      ];
+    }
+    return [];
+  }, [contextMenu, onTriggerScan, onSelectFolder, onSelectCharacter, onRefreshCatalog, selectedCharacter]);
+
+  // Live Face Scan percentage from pure Rust backend
+  useEffect(() => {
+    invoke<FaceScanProgressPayload>('get_face_scan_stats')
+      .then((stats) => {
+        setFaceScanPct(stats.percentage);
+      })
+      .catch(() => {});
+
+    const unlistenPromise = listen<FaceScanProgressPayload>('face_scan_progress', (e) => {
+      setFaceScanPct(e.payload.percentage);
+    });
+
+    return () => {
+      unlistenPromise.then((u) => u());
+    };
+  }, []);
 
   // Collapsible Picasa categories
   const [sectionExpanded, setSectionExpanded] = useState({
@@ -199,7 +324,7 @@ export const FolderSidebar: React.FC<FolderSidebarProps> = ({
     return initial;
   });
 
-  const toggleExpand = useCallback((nodeId: string) => {
+  const toggleNodeExpanded = useCallback((nodeId: string) => {
     setExpandedNodes((prev) => {
       const next = new Set(prev);
       if (next.has(nodeId)) {
@@ -211,20 +336,18 @@ export const FolderSidebar: React.FC<FolderSidebarProps> = ({
     });
   }, []);
 
-  // Filter tree if user types in search
+  // Filter folders if query is provided
   const filteredTree = useMemo(() => {
     if (!filterQuery.trim()) return treeRoots;
-    const q = filterQuery.toLowerCase();
+    const query = filterQuery.toLowerCase();
 
     function filterNode(node: FolderTreeNode): FolderTreeNode | null {
-      const matchSelf = node.name.toLowerCase().includes(q);
-      const filteredChildren: FolderTreeNode[] = [];
-      for (const child of node.children) {
-        const res = filterNode(child);
-        if (res) filteredChildren.push(res);
-      }
+      const match = node.name.toLowerCase().includes(query);
+      const filteredChildren = node.children
+        .map(filterNode)
+        .filter((c): c is FolderTreeNode => c !== null);
 
-      if (matchSelf || filteredChildren.length > 0) {
+      if (match || filteredChildren.length > 0) {
         return {
           ...node,
           children: filteredChildren,
@@ -236,72 +359,77 @@ export const FolderSidebar: React.FC<FolderSidebarProps> = ({
     return treeRoots.map(filterNode).filter((n): n is FolderTreeNode => n !== null);
   }, [treeRoots, filterQuery]);
 
-  // Render a single tree node row recursively (Picasa 3 style with slate-blue banner on active)
+  // Render recursive folder tree row
   const renderTreeNode = (node: FolderTreeNode, depth: number = 0) => {
-    const hasChildren = node.children.length > 0;
-    const isExpanded = filterQuery.trim() ? true : expandedNodes.has(node.id);
     const isSelected = selectedFolderId !== null && node.folderId === selectedFolderId;
+    const hasChildren = node.children.length > 0;
+    const isExpanded = expandedNodes.has(node.id) || Boolean(filterQuery.trim());
+    const isRoot = node.id === 'my-computer';
+    const isDrive = !isRoot && depth === 1;
 
     return (
-      <div key={node.id} className="select-none">
+      <div key={node.id} className="select-none font-sans">
+        {/* Row Element */}
         <div
           onClick={() => {
-            if (node.id === 'my-computer') {
-              onSelectFolder(null);
-              onSelectCharacter(null);
-            } else if (node.folderId) {
-              onSelectCharacter(null);
+            if (node.folderId) {
               onSelectFolder(node.folderId);
+              onSelectCharacter(null);
             } else if (hasChildren) {
-              toggleExpand(node.id);
+              toggleNodeExpanded(node.id);
             }
           }}
-          style={{ paddingLeft: `${depth * 13 + 4}px` }}
-          className={`flex items-center space-x-1.5 py-0.5 pr-2 cursor-pointer transition-colors text-left group ${
+          onContextMenu={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            setContextMenu({ x: e.clientX, y: e.clientY, folderNode: node });
+          }}
+          style={{ paddingLeft: `${Math.max(6, depth * 14)}px` }}
+          className={`group flex items-center pr-2 py-0.5 cursor-pointer text-xs transition-colors relative ${
             isSelected
               ? isDark
-                ? 'bg-[#3F5164] text-white font-semibold'
-                : 'bg-[#7E8FA2] text-white font-semibold'
+                ? 'bg-[#3F5164] text-white font-medium shadow-2xs'
+                : 'bg-[#7E8FA2] text-white font-medium shadow-2xs'
               : isDark
-              ? 'text-[#CCCCCC] hover:bg-[#252525] hover:text-white'
-              : 'text-[#2D3748] hover:bg-[#EAECEF] hover:text-[#111827]'
+              ? 'hover:bg-[#252525] text-[#D4D4D4]'
+              : 'hover:bg-[#EAECEF] text-[#2D3748]'
           }`}
-          title={node.fullPath}
         >
-          {/* Blue triangle expand/collapse button */}
-          {hasChildren ? (
-            <button
-              type="button"
-              onClick={(e) => {
+          {/* Expander Icon */}
+          <div
+            onClick={(e) => {
+              if (hasChildren) {
                 e.stopPropagation();
-                toggleExpand(node.id);
-              }}
-              className="w-3.5 h-3.5 flex items-center justify-center shrink-0 cursor-pointer"
-            >
-              <BlueTriangleExpander expanded={isExpanded} />
-            </button>
-          ) : (
-            <span className="w-3.5 shrink-0" />
-          )}
+                toggleNodeExpanded(node.id);
+              }
+            }}
+            className="w-3.5 h-3.5 flex items-center justify-center shrink-0 mr-1"
+          >
+            {hasChildren && <BlueTriangleExpander expanded={isExpanded} />}
+          </div>
 
-          {/* Folder Icon / Manila icon */}
-          <div className="shrink-0 flex items-center justify-center">
-            {node.id === 'my-computer' ? (
+          {/* Folder / Drive / PC Icon */}
+          <div className="shrink-0 mr-1.5 flex items-center">
+            {isRoot ? (
+              <span className="text-[#0078D4] text-[13px] font-bold">💻</span>
+            ) : isDrive ? (
               <HardDrive size={13} className="text-[#0078D4]" />
-            ) : hasChildren && isExpanded ? (
-              <FolderOpen size={13} className="text-[#EAA300] fill-[#FFC83B]" />
+            ) : isExpanded ? (
+              <FolderOpen size={13} className="text-[#D97706] fill-[#FCD34D]" />
             ) : (
-              <Folder size={13} className="text-[#EAA300] fill-[#FFC83B]" />
+              <Folder size={13} className="text-[#D97706] fill-[#FBBF24]" />
             )}
           </div>
 
           {/* Folder Name */}
-          <span className="truncate text-[11px] min-w-0">{node.name}</span>
+          <span className="truncate flex-1 text-[11px] leading-tight font-normal">
+            {node.name}
+          </span>
 
-          {/* Photo Count in parentheses: name (count) */}
-          {(node.photoCount > 0 || (node.id === 'my-computer' && node.totalPhotosUnder > 0)) && (
+          {/* Photo Count Badge (Picasa style) */}
+          {node.totalPhotosUnder > 0 && (
             <span
-              className={`text-[11px] shrink-0 font-normal ${
+              className={`text-[10px] ml-1.5 font-mono shrink-0 ${
                 isSelected
                   ? 'text-white/90'
                   : isDark
@@ -309,14 +437,7 @@ export const FolderSidebar: React.FC<FolderSidebarProps> = ({
                   : 'text-[#64748B]'
               }`}
             >
-              ({node.id === 'my-computer' ? node.totalPhotosUnder : node.photoCount})
-            </span>
-          )}
-
-          {/* Cloud Sync Status Indicator */}
-          {node.syncEnabled && (
-            <span className="ml-auto shrink-0 flex items-center" title="Synced to Google Photos">
-              <Cloud size={11} className={isSelected ? 'text-white' : 'text-[#0078D4]'} />
+              ({node.totalPhotosUnder})
             </span>
           )}
 
@@ -337,10 +458,6 @@ export const FolderSidebar: React.FC<FolderSidebarProps> = ({
       </div>
     );
   };
-
-  const unnamedCount = useMemo(() => {
-    return Math.max(0, totalPhotos - characters.reduce((sum, c) => sum + c.count, 0));
-  }, [totalPhotos, characters]);
 
   return (
     <aside
@@ -421,17 +538,12 @@ export const FolderSidebar: React.FC<FolderSidebarProps> = ({
                   <BookMarked size={13} className="text-[#107C41]" />
                   <span className="text-[11px]">Recently Updated</span>
                 </div>
-                <span className={`text-[10px] ${selectedFolderId === null && selectedCharacter === null ? 'text-white/90' : 'text-[#64748B]'}`}>
-                  ({Math.min(totalPhotos, 250)})
-                </span>
+                <span className="text-[10px] text-[#64748B]">({folders.length})</span>
               </button>
 
               {/* Starred Photos */}
               <button
-                onClick={() => {
-                  onSelectFolder(null);
-                  onSelectCharacter(null);
-                }}
+                onClick={() => {}}
                 className={`w-full flex items-center justify-between px-3 py-1 text-left cursor-pointer transition-colors ${
                   isDark ? 'hover:bg-[#252525] text-[#CCCCCC]' : 'hover:bg-[#EAECEF] text-[#374151]'
                 }`}
@@ -465,23 +577,42 @@ export const FolderSidebar: React.FC<FolderSidebarProps> = ({
 
           {sectionExpanded.people && (
             <div className="py-1">
-              {/* Unnamed group */}
+              {/* Unnamed group (Shows live Face Scan Percentage instead of total photos count) */}
               <button
                 onClick={() => {
                   onSelectFolder(null);
-                  onSelectCharacter(null);
+                  onSelectCharacter('__unnamed__');
                 }}
                 className={`w-full flex items-center justify-between px-3 py-1 text-left cursor-pointer transition-colors ${
-                  isDark ? 'hover:bg-[#252525] text-[#CCCCCC]' : 'hover:bg-[#EAECEF] text-[#374151]'
+                  selectedCharacter === '__unnamed__'
+                    ? isDark
+                      ? 'bg-[#3F5164] text-white font-semibold'
+                      : 'bg-[#7E8FA2] text-white font-semibold'
+                    : isDark
+                    ? 'hover:bg-[#252525] text-[#CCCCCC]'
+                    : 'hover:bg-[#EAECEF] text-[#374151]'
                 }`}
               >
                 <div className="flex items-center space-x-2">
-                  <div className="w-4 h-4 bg-[#64748B] text-white flex items-center justify-center text-[10px]">
+                  <div
+                    className={`w-4 h-4 flex items-center justify-center text-[10px] ${
+                      selectedCharacter === '__unnamed__'
+                        ? 'bg-white text-[#0078D4]'
+                        : 'bg-[#64748B] text-white'
+                    }`}
+                  >
                     <User size={11} />
                   </div>
                   <span className="text-[11px]">Unnamed</span>
                 </div>
-                <span className="text-[10px] text-[#64748B]">({unnamedCount})</span>
+                {/* Shows percentage scanned (e.g. 0%, 25%, 100%) */}
+                <span
+                  className={`text-[10px] font-mono font-medium ${
+                    selectedCharacter === '__unnamed__' ? 'text-white' : 'text-[#0078D4] dark:text-[#60A5FA]'
+                  }`}
+                >
+                  ({faceScanPct}%)
+                </span>
               </button>
 
               {/* Tagged people from catalog */}
@@ -493,6 +624,11 @@ export const FolderSidebar: React.FC<FolderSidebarProps> = ({
                     onClick={() => {
                       onSelectFolder(null);
                       onSelectCharacter(char.name);
+                    }}
+                    onContextMenu={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      setContextMenu({ x: e.clientX, y: e.clientY, character: char });
                     }}
                     className={`w-full flex items-center justify-between px-3 py-1 text-left cursor-pointer transition-colors ${
                       isSelected
@@ -589,6 +725,16 @@ export const FolderSidebar: React.FC<FolderSidebarProps> = ({
         <span className="font-medium">RedCaso Photo Engine</span>
         <span className="text-[#0078D4] font-mono">v1.0.0</span>
       </div>
+      {/* Context Menu Popup */}
+      {contextMenu && (
+        <ContextMenu
+          x={contextMenu.x}
+          y={contextMenu.y}
+          items={contextMenuItems}
+          onClose={() => setContextMenu(null)}
+          isDark={isDark}
+        />
+      )}
     </aside>
   );
 };

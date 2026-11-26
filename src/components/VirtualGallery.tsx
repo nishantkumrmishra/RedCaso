@@ -1,15 +1,36 @@
 import React, { useRef, useState, useCallback, useMemo, memo } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { MediaRecord, FolderRecord } from '../types';
+import { useFluentDialog } from './FluentDialog';
 import { ImageCell } from './ImageCell';
-import { Folder, Image as EmptyIcon, Calendar, Cloud, Play, Upload, Star } from 'lucide-react';
+import { ScrollTrack } from './ScrollTrack';
+import { ContextMenu, ContextMenuItem } from './ContextMenu';
+import { PropertiesDialog } from './PropertiesDialog';
+import {
+  Folder,
+  Calendar,
+  Cloud,
+  Play,
+  Upload,
+  Maximize2,
+  ExternalLink,
+  RotateCw,
+  RotateCcw,
+  Copy,
+  Trash2,
+  Info,
+} from 'lucide-react';
+import { invoke } from '@tauri-apps/api/core';
 
 interface VirtualGalleryProps {
   items: MediaRecord[];
   folders: FolderRecord[];
   onSelectMedia: (media: MediaRecord) => void;
   onToggleSync: (folderId: number, currentEnabled: boolean) => void;
+  onRefreshMedia?: () => void;
   isDark?: boolean;
+  viewMode?: 'photos' | 'people';
+  onToggleViewMode?: (mode: 'photos' | 'people') => void;
 }
 
 interface GalleryBatch {
@@ -38,7 +59,7 @@ const FloatingTimelineHUD = memo(({
 
   return (
     <div className="absolute bottom-8 left-1/2 -translate-x-1/2 z-40 bg-[#0078D4]/95 backdrop-blur-md text-white px-4 py-2 shadow-2xl border border-white/20 flex items-center space-x-2 text-xs font-semibold animate-in fade-in zoom-in-95 pointer-events-none select-none">
-      <Calendar size={14} className="text-[#60CDFF]" />
+      <Calendar size={14} className="text-[#60CDFF]\" />
       <span>{text || 'Photos'}</span>
       <span className="text-[#B3E0FF] text-[11px] font-mono pl-1 border-l border-white/30">
         {index} / {total}
@@ -65,7 +86,10 @@ export const VirtualGallery: React.FC<VirtualGalleryProps> = memo(({
   folders,
   onSelectMedia,
   onToggleSync,
+  onRefreshMedia,
   isDark = false,
+  viewMode = 'photos',
+  onToggleViewMode,
 }) => {
   const parentRef = useRef<HTMLDivElement>(null);
 
@@ -78,6 +102,17 @@ export const VirtualGallery: React.FC<VirtualGalleryProps> = memo(({
     text: '',
     index: 1,
   });
+
+  // Context Menu & Properties Dialog state
+  const [contextMenu, setContextMenu] = useState<{
+    x: number;
+    y: number;
+    media?: MediaRecord;
+    folder?: FolderRecord;
+  } | null>(null);
+
+  const [propertiesMedia, setPropertiesMedia] = useState<MediaRecord | null>(null);
+  const { confirm } = useFluentDialog();
 
   const lastScrollTop = useRef<number>(0);
   const lastScrollTime = useRef<number>(Date.now());
@@ -118,7 +153,7 @@ export const VirtualGallery: React.FC<VirtualGalleryProps> = memo(({
 
       for (let i = 0; i < folderItems.length; i += BATCH_SIZE) {
         result.push({
-          key: `folder-${folderId}-batch-${i}`,
+          key: `${folderId}_batch_${i}`,
           folderId,
           folder: folderRecord,
           isFirstBatch: i === 0,
@@ -131,6 +166,22 @@ export const VirtualGallery: React.FC<VirtualGalleryProps> = memo(({
 
     return result;
   }, [items, folders]);
+
+  // Track pixel offsets of each folder header for instant jump navigation
+  const folderOffsets = useMemo(() => {
+    const offsets: number[] = [];
+    let currentY = 0;
+    for (const batch of batches) {
+      if (batch.isFirstBatch) {
+        offsets.push(currentY);
+      }
+      const isFirst = batch.isFirstBatch;
+      const count = batch.images.length || 0;
+      const lines = Math.max(1, Math.ceil(count / 6));
+      currentY += (isFirst ? 68 : 0) + lines * 182 + 16;
+    }
+    return offsets;
+  }, [batches]);
 
   // Throttled scroll HUD indicator
   const handleScroll = useCallback(
@@ -182,49 +233,151 @@ export const VirtualGallery: React.FC<VirtualGalleryProps> = memo(({
       const batch = batches[index];
       const isFirst = batch?.isFirstBatch;
       const count = batch?.images.length || 0;
-      // Estimate ~6 photos per line (170px height + 12px gap)
       const lines = Math.max(1, Math.ceil(count / 6));
       return (isFirst ? 68 : 0) + lines * 182 + 16;
     },
-    overscan: 2, // Minimal 2-batch buffer prevents memory accumulation while scrolling
+    overscan: 2,
   });
+
+  // Photo context menu items
+  const photoMenuItems: ContextMenuItem[] = useMemo(() => {
+    if (!contextMenu?.media) return [];
+    const media = contextMenu.media;
+
+    return [
+      {
+        label: 'View Fullscreen',
+        icon: <Maximize2 size={13} />,
+        shortcut: 'Enter',
+        onClick: () => onSelectMedia(media),
+      },
+      {
+        label: 'Locate on Disk',
+        icon: <ExternalLink size={13} />,
+        shortcut: 'Ctrl+O',
+        onClick: () => {
+          invoke('reveal_in_explorer', { filePath: media.file_path }).catch(console.error);
+        },
+      },
+      { separator: true },
+      {
+        label: 'Rotate Clockwise',
+        icon: <RotateCw size={13} />,
+        shortcut: 'Ctrl+R',
+        onClick: async () => {
+          try {
+            await invoke('rotate_image', { filePath: media.file_path, degrees: 90 });
+            onRefreshMedia?.();
+          } catch (e) {
+            console.error('Rotate failed:', e);
+          }
+        },
+      },
+      {
+        label: 'Rotate Counter-Clockwise',
+        icon: <RotateCcw size={13} />,
+        shortcut: 'Ctrl+Shift+R',
+        onClick: async () => {
+          try {
+            await invoke('rotate_image', { filePath: media.file_path, degrees: -90 });
+            onRefreshMedia?.();
+          } catch (e) {
+            console.error('Rotate failed:', e);
+          }
+        },
+      },
+      { separator: true },
+      {
+        label: 'Copy File Path',
+        icon: <Copy size={13} />,
+        shortcut: 'Ctrl+C',
+        onClick: () => {
+          navigator.clipboard.writeText(media.file_path);
+        },
+      },
+      {
+        label: 'Properties',
+        icon: <Info size={13} />,
+        shortcut: 'Alt+Enter',
+        onClick: () => {
+          setPropertiesMedia(media);
+        },
+      },
+      { separator: true },
+      {
+        label: 'Remove from Library',
+        icon: <Trash2 size={13} />,
+        shortcut: 'Del',
+        danger: true,
+        onClick: async () => {
+          const ok = await confirm({ title: "Remove Photo", message: `Remove "${media.file_name}" from library?`, confirmLabel: "Remove", isDestructive: true });
+        if (ok) {
+            try {
+              await invoke('delete_media', { filePath: media.file_path });
+              onRefreshMedia?.();
+            } catch (e) {
+              console.error('Delete failed:', e);
+            }
+          }
+        },
+      },
+    ];
+  }, [contextMenu, onSelectMedia, onRefreshMedia]);
+
+  // Folder context menu items
+  const folderMenuItems: ContextMenuItem[] = useMemo(() => {
+    if (!contextMenu?.folder) return [];
+    const folder = contextMenu.folder;
+
+    return [
+      {
+        label: 'Open in File Explorer',
+        icon: <ExternalLink size={13} />,
+        onClick: () => {
+          invoke('open_folder_in_explorer', { folderPath: folder.folder_path }).catch(console.error);
+        },
+      },
+      {
+        label: folder.sync_enabled ? 'Disable Web Sync' : 'Sync to Google Photos',
+        icon: <Cloud size={13} />,
+        onClick: () => {
+          onToggleSync(folder.id, folder.sync_enabled);
+        },
+      },
+      { separator: true },
+      {
+        label: 'Copy Folder Path',
+        icon: <Copy size={13} />,
+        onClick: () => {
+          navigator.clipboard.writeText(folder.folder_path);
+        },
+      },
+    ];
+  }, [contextMenu, onToggleSync]);
 
   if (items.length === 0) {
     return (
-      <div
-        className={`flex-1 flex flex-col items-center justify-center p-8 text-center font-sans ${
-          isDark ? 'text-[#777777] bg-[#141414]' : 'text-[#6B7280] bg-[#ECEEF1]'
-        }`}
-      >
-        <div
-          className={`border p-8 max-w-md w-full shadow-xs ${
-            isDark ? 'border-[#2C2C2C] bg-[#202020]' : 'border-[#D1D5DB] bg-white'
-          }`}
-        >
-          <EmptyIcon size={36} className={`mx-auto mb-3 ${isDark ? 'text-[#555555]' : 'text-[#9CA3AF]'}`} />
-          <p className={`text-sm font-semibold mb-1 ${isDark ? 'text-[#CCCCCC]' : 'text-[#1F2937]'}`}>
-            No Photos in This View
-          </p>
-          <p className={`text-xs ${isDark ? 'text-[#888888]' : 'text-[#6B7280]'}`}>
-            Select a folder from the sidebar or click &quot;Scan PC Drives&quot; to index your pictures.
-          </p>
+      <div className="flex-1 flex flex-col items-center justify-center p-8 text-center select-none font-sans">
+        <div className="w-16 h-16 bg-[#EAA300]/10 border border-[#EAA300]/20 flex items-center justify-center mb-4">
+          <Folder size={28} className="text-[#FFC83B]" />
         </div>
+        <h3 className={`text-base font-semibold ${isDark ? 'text-white' : 'text-[#1F2937]'}`}>
+          No photos found in this view
+        </h3>
+        <p className="text-xs text-[#6B7280] dark:text-[#888888] mt-1 max-w-sm">
+          Select another folder from the left sidebar or scan drives to populate photos.
+        </p>
       </div>
     );
   }
 
   return (
-    <div className="relative flex-1 h-full overflow-hidden">
-      {/* Scrollable Gallery Container */}
+    <div className="flex-1 flex overflow-hidden relative font-sans select-none">
+      {/* Scrollable Virtual Canvas */}
       <div
         ref={parentRef}
         onScroll={handleScroll}
-        className={`h-full overflow-y-auto px-6 py-5 select-none transition-colors ${
-          isDark ? 'bg-[#141414]' : 'bg-[#ECEEF1]'
-        }`}
-        style={{
-          willChange: 'scroll-position',
-        }}
+        className="flex-1 overflow-y-auto px-6 py-4 scrollbar-none"
       >
         <div
           style={{
@@ -239,7 +392,7 @@ export const VirtualGallery: React.FC<VirtualGalleryProps> = memo(({
 
             return (
               <div
-                key={virtualRow.key}
+                key={batch.key}
                 data-index={virtualRow.index}
                 ref={rowVirtualizer.measureElement}
                 style={{
@@ -249,83 +402,58 @@ export const VirtualGallery: React.FC<VirtualGalleryProps> = memo(({
                   width: '100%',
                   transform: `translateY(${virtualRow.start}px)`,
                 }}
-                className="pb-5"
+                className="pb-4"
               >
-                {/* Picasa-style Folder Header Banner (shown on the first batch of each folder) */}
+                {/* Authentic Picasa Metallic Folder Header */}
                 {batch.isFirstBatch && (
                   <div
-                    className={`w-full flex items-center justify-between px-4 py-2.5 mb-3 border shadow-xs transition-colors ${
+                    onContextMenu={(e) => {
+                      e.preventDefault();
+                      setContextMenu({ x: e.clientX, y: e.clientY, folder: batch.folder });
+                    }}
+                    className={`h-[48px] px-3.5 mb-3 flex items-center justify-between border-t border-b shadow-2xs ${
                       isDark
-                        ? 'bg-[#1F1F1F] border-[#2D2D2D]'
-                        : 'bg-white border-[#D6D9DE]'
+                        ? 'bg-gradient-to-b from-[#2E3135] via-[#26282B] to-[#1E2022] border-[#3B3F45] text-white'
+                        : 'bg-gradient-to-b from-[#F2F4F7] via-[#E4E7EB] to-[#D5D8DC] border-[#B8BDC2] text-[#1F2937]'
                     }`}
                   >
-                    {/* Left: Golden Folder Icon + Name + Date */}
-                    <div className="flex items-center space-x-3 min-w-0">
-                      <div className="w-8 h-8 bg-[#EAA300]/15 border border-[#EAA300]/30 flex items-center justify-center shrink-0">
-                        <Folder size={17} className="text-[#FFC83B] fill-[#FFC83B]/20" />
-                      </div>
-                      <div className="min-w-0">
-                        <div className="flex items-center space-x-2">
-                          <h2
-                            className={`text-sm font-bold tracking-tight truncate ${
-                              isDark ? 'text-white' : 'text-[#111827]'
-                            }`}
-                          >
-                            {batch.folder.folder_name}
-                          </h2>
-                          <span
-                            className={`text-[11px] font-medium px-2 py-0.5 shrink-0 ${
-                              isDark
-                                ? 'text-[#AAAAAA] bg-[#2A2A2A]'
-                                : 'text-[#4B5563] bg-[#F3F4F6]'
-                            }`}
-                          >
-                            {batch.totalCount} {batch.totalCount === 1 ? 'photo' : 'photos'}
-                          </span>
-                        </div>
-                        {batch.dateLabel && (
-                          <div
-                            className={`text-[11px] font-medium mt-0.5 ${
-                              isDark ? 'text-[#888888]' : 'text-[#6B7280]'
-                            }`}
-                          >
-                            {batch.dateLabel}
-                          </div>
-                        )}
-                      </div>
+                    {/* Left: Folder Name, Date and Photo Count */}
+                    <div className="flex items-center space-x-2.5 truncate min-w-0 pr-2">
+                      <Folder size={17} className="text-[#0078D4] shrink-0" />
+                      <span className="font-bold text-sm tracking-tight truncate">
+                        {batch.folder.folder_name}
+                      </span>
+                      {batch.dateLabel && (
+                        <span className="text-xs text-[#6B7280] dark:text-[#AAAAAA] font-normal truncate hidden sm:inline">
+                          &bull; {batch.dateLabel}
+                        </span>
+                      )}
+                      <span className="text-[11px] font-mono text-[#6B7280] dark:text-[#888888] shrink-0">
+                        ({batch.totalCount})
+                      </span>
                     </div>
 
-                    {/* Middle: Picasa Quick Actions (Play, Star, Upload) */}
-                    <div className="hidden md:flex items-center space-x-1">
+                    {/* Action Buttons */}
+                    <div className="flex items-center space-x-2 shrink-0">
                       <button
                         type="button"
-                        onClick={() => batch.images[0] && onSelectMedia(batch.images[0])}
-                        title="Start slideshow"
-                        className={`p-1.5 border transition-colors ${
+                        onClick={() => {
+                          if (batch.images.length > 0) onSelectMedia(batch.images[0]);
+                        }}
+                        title="Play Slideshow"
+                        className={`p-1.5 border flex items-center justify-center transition-colors cursor-pointer ${
                           isDark
                             ? 'border-[#333333] hover:bg-[#2A2A2A] text-[#CCCCCC]'
                             : 'border-[#E0E2E6] hover:bg-[#F3F4F6] text-[#4B5563]'
                         }`}
                       >
-                        <Play size={13} />
-                      </button>
-                      <button
-                        type="button"
-                        title="Add star"
-                        className={`p-1.5 border transition-colors ${
-                          isDark
-                            ? 'border-[#333333] hover:bg-[#2A2A2A] text-[#CCCCCC]'
-                            : 'border-[#E0E2E6] hover:bg-[#F3F4F6] text-[#4B5563]'
-                        }`}
-                      >
-                        <Star size={13} />
+                        <Play size={12} className="fill-current text-[#107C41]" />
                       </button>
                       <button
                         type="button"
                         onClick={() => onToggleSync(batch.folder.id, batch.folder.sync_enabled)}
                         title="Sync folder to Google Photos"
-                        className={`px-2 py-1 border flex items-center space-x-1.5 text-xs transition-colors ${
+                        className={`px-2 py-1 border flex items-center space-x-1.5 text-xs transition-colors cursor-pointer ${
                           isDark
                             ? 'border-[#333333] hover:bg-[#2A2A2A] text-[#CCCCCC]'
                             : 'border-[#E0E2E6] hover:bg-[#F3F4F6] text-[#4B5563]'
@@ -333,49 +461,6 @@ export const VirtualGallery: React.FC<VirtualGalleryProps> = memo(({
                       >
                         <Upload size={12} />
                         <span className="text-[11px]">Upload</span>
-                      </button>
-                    </div>
-
-                    {/* Right: Sync to Google Photos Sharp Toggle Switch */}
-                    <div className="flex items-center space-x-3 shrink-0 pl-3">
-                      <div className="flex items-center space-x-1.5 text-xs">
-                        <Cloud
-                          size={14}
-                          className={batch.folder.sync_enabled ? 'text-[#0078D4]' : isDark ? 'text-[#777777]' : 'text-[#9CA3AF]'}
-                        />
-                        <span
-                          className={`text-xs font-medium hidden sm:inline ${
-                            batch.folder.sync_enabled
-                              ? isDark ? 'text-white' : 'text-[#111827]'
-                              : isDark ? 'text-[#888888]' : 'text-[#4B5563]'
-                          }`}
-                        >
-                          Sync to Web
-                        </span>
-                      </div>
-
-                      {/* Sharp Rectangular Toggle Switch */}
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          onToggleSync(batch.folder.id, batch.folder.sync_enabled);
-                        }}
-                        type="button"
-                        className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer border border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
-                          batch.folder.sync_enabled
-                            ? 'bg-[#0078D4]'
-                            : isDark ? 'bg-[#383838]' : 'bg-[#D1D5DB]'
-                        }`}
-                        role="switch"
-                        aria-checked={batch.folder.sync_enabled}
-                        title={batch.folder.sync_enabled ? 'Disable Google Photos sync' : 'Enable Google Photos sync'}
-                      >
-                        <span
-                          aria-hidden="true"
-                          className={`pointer-events-none inline-block h-5 w-5 transform bg-white shadow-md transition duration-200 ease-in-out ${
-                            batch.folder.sync_enabled ? 'translate-x-5' : 'translate-x-0'
-                          }`}
-                        />
                       </button>
                     </div>
                   </div>
@@ -388,6 +473,9 @@ export const VirtualGallery: React.FC<VirtualGalleryProps> = memo(({
                       key={media.id}
                       media={media}
                       onSelect={onSelectMedia}
+                      onContextMenu={(e, item) => {
+                        setContextMenu({ x: e.clientX, y: e.clientY, media: item });
+                      }}
                       isDark={isDark}
                     />
                   ))}
@@ -398,6 +486,17 @@ export const VirtualGallery: React.FC<VirtualGalleryProps> = memo(({
         </div>
       </div>
 
+      {/* Picasa Custom Scrollbar Navigation Track */}
+      {onToggleViewMode && (
+        <ScrollTrack
+          containerRef={parentRef}
+          viewMode={viewMode}
+          onToggleViewMode={onToggleViewMode}
+          folderOffsets={folderOffsets}
+          isDark={isDark}
+        />
+      )}
+
       {/* Picasa Floating Timeline HUD */}
       <FloatingTimelineHUD
         visible={hudState.visible}
@@ -405,6 +504,26 @@ export const VirtualGallery: React.FC<VirtualGalleryProps> = memo(({
         index={hudState.index}
         total={items.length}
       />
+
+      {/* Context Menu Popup */}
+      {contextMenu && (
+        <ContextMenu
+          x={contextMenu.x}
+          y={contextMenu.y}
+          items={contextMenu.media ? photoMenuItems : folderMenuItems}
+          onClose={() => setContextMenu(null)}
+          isDark={isDark}
+        />
+      )}
+
+      {/* Properties Dialog */}
+      {propertiesMedia && (
+        <PropertiesDialog
+          media={propertiesMedia}
+          onClose={() => setPropertiesMedia(null)}
+          isDark={isDark}
+        />
+      )}
     </div>
   );
 });

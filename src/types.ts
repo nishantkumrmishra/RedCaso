@@ -28,6 +28,39 @@ export interface CharacterRecord {
   count: number;
 }
 
+export interface FaceRecord {
+  id: number;
+  media_id: number;
+  file_path: string;
+  crop_path: string;
+  box_x: number;
+  box_y: number;
+  box_w: number;
+  box_h: number;
+  person_name?: string | null;
+  is_ignored: boolean;
+  group_id?: number;
+}
+
+export interface FaceGroupRecord {
+  group_id: number;
+  representative_face_id: number;
+  representative_crop_path: string;
+  representative_file_path: string;
+  face_count: number;
+  person_name?: string | null;
+  faces: FaceRecord[];
+}
+
+export interface FaceScanProgressPayload {
+  scanned: number;
+  total: number;
+  faces_found: number;
+  groups_count: number;
+  percentage: number;
+  is_complete: boolean;
+}
+
 export interface ScanProgressPayload {
   status: string;
   current_folder: string;

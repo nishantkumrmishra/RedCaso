@@ -6,7 +6,7 @@ use std::collections::HashSet;
 use std::fs::File;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use tauri::{AppHandle, Emitter, Manager};
+use tauri::{AppHandle, Emitter};
 use walkdir::WalkDir;
 
 #[derive(Clone, Serialize)]
@@ -178,17 +178,7 @@ impl Scanner {
                                     .map(|n| n.to_string_lossy().to_string())
                                     .unwrap_or_default();
 
-                                // Show floating desktop detector window even when main window is minimized
-                                if let Some(detector) = app_handle.get_webview_window("detector") {
-                                    if let Ok(Some(mon)) = detector.primary_monitor() {
-                                        let size = mon.size();
-                                        let scale = mon.scale_factor();
-                                        let x = size.width as i32 - (340.0 * scale) as i32;
-                                        let y = size.height as i32 - (130.0 * scale) as i32;
-                                        let _ = detector.set_position(tauri::Position::Physical(tauri::PhysicalPosition { x, y }));
-                                    }
-                                    let _ = detector.show();
-                                }
+
 
                                 // Stream folder event immediately to the UI
                                 let _ = app_handle.emit(
@@ -205,18 +195,14 @@ impl Scanner {
                                     },
                                 );
 
-                                std::thread::sleep(std::time::Duration::from_millis(50));
+                                std::thread::sleep(std::time::Duration::from_millis(85));
                             }
                         }
                     }
                 }
             }
 
-            // Hide floating desktop detector window after scan completes
-            if let Some(detector) = app_handle.get_webview_window("detector") {
-                std::thread::sleep(std::time::Duration::from_secs(4));
-                let _ = detector.hide();
-            }
+
 
             let _ = app_handle.emit(
                 "scan_complete",

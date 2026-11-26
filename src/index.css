@@ -1,14 +1,21 @@
+@import url('https://fonts.googleapis.com/css2?family=Manrope:wght@400&display=swap');
 @import "tailwindcss";
 
 @layer base {
+  *, ::before, ::after {
+    font-family: 'Manrope', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif !important;
+    font-weight: 400 !important;
+  }
+
   body {
     background-color: #ECEEF1;
     color: #111827;
-    font-family: "Segoe UI Variable Text", "Segoe UI", -apple-system, BlinkMacSystemFont, Roboto, "Helvetica Neue", sans-serif;
+    font-family: 'Manrope', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    font-weight: 400;
   }
 }
 
-/* Crisp Sharp Windows Scrollbar (Zero rounded corners) */
+/* Crisp Sharp Windows Scrollbar */
 ::-webkit-scrollbar {
   width: 6px;
   height: 6px;

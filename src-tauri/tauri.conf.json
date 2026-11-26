@@ -1,7 +1,7 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "RedCaso",
-  "version": "1.0.0",
+  "version": "1.5.0",
   "identifier": "com.redcaso.desktop",
   "build": {
     "frontendDist": "../dist",
@@ -22,18 +22,6 @@
         "fullscreen": false,
         "decorations": false,
         "shadow": true
-      },
-      {
-        "label": "detector",
-        "title": "RedCaso Detector",
-        "width": 320,
-        "height": 84,
-        "resizable": false,
-        "decorations": false,
-        "alwaysOnTop": true,
-        "skipTaskbar": true,
-        "shadow": true,
-        "visible": false
       }
     ],
     "security": {

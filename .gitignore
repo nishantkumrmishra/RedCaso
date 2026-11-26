@@ -5,6 +5,7 @@ node_modules/
 dist/
 dist-ssr/
 *.local
+release-artifacts/
 
 # Tauri / Rust build artifacts
 src-tauri/target/

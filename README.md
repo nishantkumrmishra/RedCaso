@@ -2,7 +2,7 @@
 
 > **A blazingly fast, modern desktop photo organizer and Google Photos sync manager — heavily inspired by Google Picasa 3.**
 
-[![Release](https://img.shields.io/badge/release-v1.0.0-blue.svg)](https://github.com/nishantkumrmishra/RedCaso/releases/tag/v1.0.0)
+[![Release](https://img.shields.io/badge/release-v1.5.0-blue.svg)](https://github.com/nishantkumrmishra/RedCaso/releases/tag/v1.5.0)
 [![Tauri](https://img.shields.io/badge/Tauri-v2-orange.svg)](https://tauri.app/)
 [![Rust](https://img.shields.io/badge/Rust-1.80+-red.svg)](https://www.rust-lang.org/)
 [![React](https://img.shields.io/badge/React-19-61DAFB.svg)](https://react.dev/)
@@ -44,24 +44,28 @@ While modern electron apps consume gigabytes of memory, RedCaso runs at **under 
   - *Fill Light* and *Contrast* sliders
   - *Color Temperature* and *Saturation* tuning
   - *B&W*, *Sepia*, *Warmify*, and *Cool Tint* creative effects
-  - $90^\circ$ lossless rotations and star/favoriting
+  - 90° lossless rotations and star/favoriting
 
-### 4. Background Scanner & Desktop Detector Toast
+### 4. Facial Recognition & People Clustering (New in v1.5.0)
+- **Embedded Neural Face Detection**: Integrated `rustface` model detecting faces at 150+ photos/sec.
+- **People View**: Automatic face thumbnail extraction, grouping, and naming.
+
+### 5. Background Scanner & Desktop Detector Toast
 - **Paced Picasa Scanner**: Scans drives (`C:`, `D:`, etc.) in the background while keeping CPU under 5%.
 - **Desktop Detector Toast**: Floating secondary window on the desktop that alerts you in real time with thumbnail previews as new folders are discovered, even when the main app is minimized.
 
-### 5. Google Photos Sync Manager
+### 6. Google Photos Sync Manager
 - Direct one-click folder sync toggle to back up local albums to Google Photos with progress pills.
 
-### 6. Design Principles
-- **Strict $90^\circ$ Sharp Corners**: Absolutely no rounded borders; clean rectangular corners across all cards, buttons, badges, and modals.
+### 7. Design Principles
+- **Strict 90° Sharp Corners**: Clean rectangular corners across all cards, buttons, badges, and modals.
 - **System Theme Adaptive**: Defaults to Light Mode matching Windows 11 preferences, with an instant toggle for Dark Mode.
 
 ---
 
-## 🚀 Downloads (v1.0.0)
+## 🚀 Downloads (v1.5.0)
 
-Pre-built binaries are available under [GitHub Releases](https://github.com/nishantkumrmishra/RedCaso/releases/tag/v1.0.0):
+Pre-built binaries are available under [GitHub Releases](https://github.com/nishantkumrmishra/RedCaso/releases/tag/v1.5.0):
 
 | Package | Format | Description |
 | :--- | :--- | :--- |
@@ -78,54 +82,38 @@ RedCaso is built on **Tauri v2** with a high-throughput hybrid pipeline:
 [ Local Disk Drives ]
         │ (walkdir crawler)
         ▼
-[ Rust Scanner Engine ] ──► [ SQLite WAL Database (catalog.db) ]
-        │                                  │
-        ├─► [ Multi-threaded SIMD Thumbnails ]
-        │
-        ▼ (IPC Events)
-[ React 19 + TanStack Virtual + Tailwind v4 ]
-        │
-        ▼
-[ Desktop WebView2 Presentation ]
+[ Rust Background Worker ] ──(exif + rustface)──► [ SQLite Embedded Cache ]
+        │                                                     │
+        ▼ (tauri IPC / asset protocol)                         ▼
+[ React 19 Virtualized DOM ] ◄───────────────────────── [ Memory Index ]
 ```
-
-- **Backend**: Rust 1.80+, `rusqlite` (bundled SQLite 3 with WAL mode), `image` (SIMD JPEG/PNG/WebP decoding), `kamadak-exif` (EXIF metadata extraction), `tokio` (async tasks).
-- **Frontend**: React 19, TypeScript, Vite, Tailwind CSS v4, Lucide Icons, `@tanstack/react-virtual` v3.
 
 ---
 
-## 📦 Building from Source
+## 💻 Building from Source
 
 ### Prerequisites
 - [Node.js](https://nodejs.org/) (v18+)
-- [Rust & Cargo](https://rustup.rs/) (v1.80+)
-- Visual Studio C++ Build Tools
+- [Rust](https://www.rust-lang.org/) (1.80+)
 
-### Clone & Install
+### Setup & Run
 ```bash
+# Clone the repository
 git clone https://github.com/nishantkumrmishra/RedCaso.git
 cd RedCaso
 
-# Install frontend dependencies
+# Install dependencies
 npm install
-```
 
-### Run in Development
-```bash
+# Run development mode
 npm run tauri dev
-```
 
-### Build Production Binaries
-```bash
-# Builds portable executable and installer
+# Build production bundle
 npm run tauri build
 ```
-Built binaries will be located in:
-- Portable executable: `src-tauri/target/release/redcaso.exe`
-- Installer: `src-tauri/target/release/bundle/nsis/` or `bundle/msi/`
 
 ---
 
 ## 📄 License
 
-This project is licensed under the [MIT License](LICENSE).
+MIT © [nishantkumrmishra](https://github.com/nishantkumrmishra)

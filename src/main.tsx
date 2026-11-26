@@ -1,15 +1,22 @@
 import React from 'react';
 import ReactDOM from 'react-dom/client';
-import { getCurrentWindow } from '@tauri-apps/api/window';
 import App from './App';
-import { DetectorWidget } from './components/DetectorWidget';
+import { FluentDialogProvider } from './components/FluentDialog';
 import './index.css';
 
-const currentWindow = getCurrentWindow();
-const isDetectorWindow = currentWindow.label === 'detector';
+// Globally suppress generic browser context menu (except on text inputs/textareas)
+window.addEventListener('contextmenu', (e) => {
+  const target = e.target as HTMLElement;
+  if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) {
+    return;
+  }
+  e.preventDefault();
+});
 
 ReactDOM.createRoot(document.getElementById('root') as HTMLElement).render(
   <React.StrictMode>
-    {isDetectorWindow ? <DetectorWidget /> : <App />}
+    <FluentDialogProvider>
+      <App />
+    </FluentDialogProvider>
   </React.StrictMode>
 );

@@ -1,6 +1,6 @@
 import React from 'react';
 import { ScanProgressPayload, SyncProgressPayload } from '../types';
-import { Sparkles, ArrowUpDown, Cloud, FolderCheck } from 'lucide-react';
+import { Sparkles, Cloud, FolderCheck } from 'lucide-react';
 
 interface HeaderBarProps {
   title: string;
@@ -21,6 +21,8 @@ export const HeaderBar: React.FC<HeaderBarProps> = ({
   onSortChange,
   isDark = false,
 }) => {
+  const isPeople = title.toLowerCase().includes('people') || title.toLowerCase().includes('unnamed');
+
   return (
     <div
       className={`h-12 border-b px-4 flex items-center justify-between select-none font-sans text-xs shrink-0 transition-colors ${
@@ -39,7 +41,7 @@ export const HeaderBar: React.FC<HeaderBarProps> = ({
             isDark ? 'text-[#888888] bg-[#2A2A2A]' : 'text-[#6B7280] bg-[#F3F4F6]'
           }`}
         >
-          {totalVisible} {totalVisible === 1 ? 'photo' : 'photos'}
+          {totalVisible} {isPeople ? (totalVisible === 1 ? 'face' : 'faces') : (totalVisible === 1 ? 'photo' : 'photos')}
         </span>
       </div>
 
@@ -64,42 +66,32 @@ export const HeaderBar: React.FC<HeaderBarProps> = ({
         )}
 
         {syncProgress && syncProgress.state === 'complete' && (
-          <div className="bg-[#107C41]/15 border border-[#107C41]/35 px-2.5 py-1 text-[11px] text-[#107C41] flex items-center space-x-1.5">
-            <FolderCheck size={13} />
-            <span>Sync Complete</span>
+          <div className="bg-[#107C41]/12 border border-[#107C41]/30 px-3 py-1 text-[11px] text-[#107C41] flex items-center space-x-2">
+            <FolderCheck size={14} className="text-[#107C41]" />
+            <span className="font-medium">Synced with Google Photos</span>
           </div>
         )}
       </div>
 
-      {/* Right: Sort Pill Controls */}
+      {/* Right: Sort controls */}
       <div className="flex items-center space-x-2">
-        <span className={`text-[11px] flex items-center gap-1 mr-1 ${isDark ? 'text-[#888888]' : 'text-[#6B7280]'}`}>
-          <ArrowUpDown size={12} />
-          Sort by:
-        </span>
-        <div
-          className={`flex p-0.5 border ${
-            isDark ? 'bg-[#272727] border-[#333333]' : 'bg-[#F3F4F6] border-[#E5E7EB]'
-          }`}
-        >
-          {(['date', 'name', 'size'] as const).map((mode) => {
-            const isActive = sortBy === mode;
-            return (
-              <button
-                key={mode}
-                onClick={() => onSortChange(mode)}
-                className={`px-2.5 py-1 text-[11px] font-medium transition-all capitalize cursor-pointer ${
-                  isActive
-                    ? 'bg-[#0078D4] text-white shadow-xs'
-                    : isDark
-                    ? 'text-[#AAAAAA] hover:text-white hover:bg-[#333333]'
-                    : 'text-[#6B7280] hover:text-[#111827] hover:bg-white'
-                }`}
-              >
-                {mode}
-              </button>
-            );
-          })}
+        <span className={`text-[11px] ${isDark ? 'text-[#888888]' : 'text-[#6B7280]'}`}>Sort by:</span>
+        <div className="inline-flex border border-inherit">
+          {(['date', 'name', 'size'] as const).map((type) => (
+            <button
+              key={type}
+              onClick={() => onSortChange(type)}
+              className={`px-2.5 py-1 text-xs capitalize transition-colors cursor-pointer ${
+                sortBy === type
+                  ? 'bg-[#0078D4] text-white font-medium'
+                  : isDark
+                  ? 'text-[#AAAAAA] hover:bg-[#2A2A2A]'
+                  : 'text-[#4B5563] hover:bg-[#F3F4F6]'
+              }`}
+            >
+              {type}
+            </button>
+          ))}
         </div>
       </div>
     </div>
