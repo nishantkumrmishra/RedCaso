@@ -11,6 +11,7 @@ use sync::GooglePhotosSync;
 use thumbnailer::Thumbnailer;
 
 use std::path::PathBuf;
+use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 use tauri::{AppHandle, Manager, State};
 
@@ -20,6 +21,7 @@ pub struct AppState {
     pub scanner: Arc<Scanner>,
     pub sync_mgr: Arc<GooglePhotosSync>,
     pub face_engine: Arc<FaceEngine>,
+    pub is_scanning: Arc<AtomicBool>,
 }
 
 #[tauri::command]
@@ -68,7 +70,11 @@ fn get_default_scan_paths() -> Vec<String> {
 }
 
 #[tauri::command]
-fn scan_directories(roots: Vec<String>, state: State<AppState>, app: AppHandle) -> Result<(), String> {
+fn scan_directories(
+    roots: Vec<String>,
+    state: State<AppState>,
+    app: AppHandle,
+) -> Result<(), String> {
     let paths: Vec<PathBuf> = roots.into_iter().map(PathBuf::from).collect();
     state.scanner.scan_directories(paths, app);
     Ok(())
@@ -92,7 +98,10 @@ fn get_media(
 }
 
 #[tauri::command]
-async fn get_thumbnail(file_path: String, state: State<'_, AppState>) -> Result<Option<String>, String> {
+async fn get_thumbnail(
+    file_path: String,
+    state: State<'_, AppState>,
+) -> Result<Option<String>, String> {
     let thumbnailer = Arc::clone(&state.thumbnailer);
     let db = Arc::clone(&state.db);
     let fp = file_path.clone();
@@ -115,7 +124,10 @@ fn toggle_folder_sync(
     state: State<AppState>,
     app: AppHandle,
 ) -> Result<(), String> {
-    state.db.toggle_sync(folder_id, enabled).map_err(|e| e.to_string())?;
+    state
+        .db
+        .toggle_sync(folder_id, enabled)
+        .map_err(|e| e.to_string())?;
     if enabled {
         state.sync_mgr.start_folder_sync(folder_id, app);
     }
@@ -196,31 +208,30 @@ fn rename_character(
     new_name: String,
     state: State<AppState>,
 ) -> Result<(), String> {
-    state.db.rename_character(&old_name, &new_name).map_err(|e| e.to_string())
+    state
+        .db
+        .rename_character(&old_name, &new_name)
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-fn delete_character(
-    character_name: String,
-    state: State<AppState>,
-) -> Result<(), String> {
-    state.db.delete_character(&character_name).map_err(|e| e.to_string())
+fn delete_character(character_name: String, state: State<AppState>) -> Result<(), String> {
+    state
+        .db
+        .delete_character(&character_name)
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-fn delete_media(
-    file_path: String,
-    state: State<AppState>,
-) -> Result<(), String> {
-    state.db.delete_media_record(&file_path).map_err(|e| e.to_string())
+fn delete_media(file_path: String, state: State<AppState>) -> Result<(), String> {
+    state
+        .db
+        .delete_media_record(&file_path)
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-fn rotate_image(
-    file_path: String,
-    degrees: i32,
-    state: State<AppState>,
-) -> Result<(), String> {
+fn rotate_image(file_path: String, degrees: i32, state: State<AppState>) -> Result<(), String> {
     let p = std::path::Path::new(&file_path);
     if !p.exists() {
         return Err("File does not exist".into());
@@ -240,15 +251,24 @@ fn rotate_image(
 // ================= FACE RECOGNITION COMMANDS =================
 
 #[tauri::command]
-fn get_unnamed_faces(limit: Option<i64>, state: State<AppState>) -> Result<Vec<FaceRecord>, String> {
+fn get_unnamed_faces(
+    limit: Option<i64>,
+    state: State<AppState>,
+) -> Result<Vec<FaceRecord>, String> {
     let lim = limit.unwrap_or(300);
     state.db.get_unnamed_faces(lim).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-fn get_unnamed_face_groups(limit: Option<i64>, state: State<AppState>) -> Result<Vec<FaceGroupRecord>, String> {
+fn get_unnamed_face_groups(
+    limit: Option<i64>,
+    state: State<AppState>,
+) -> Result<Vec<FaceGroupRecord>, String> {
     let lim = limit.unwrap_or(200);
-    state.db.get_unnamed_face_groups(lim).map_err(|e| e.to_string())
+    state
+        .db
+        .get_unnamed_face_groups(lim)
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -260,7 +280,11 @@ fn assign_face_name(face_id: i64, name: String, state: State<AppState>) -> Resul
 }
 
 #[tauri::command]
-fn assign_face_group_name(group_id: i64, name: String, state: State<AppState>) -> Result<(), String> {
+fn assign_face_group_name(
+    group_id: i64,
+    name: String,
+    state: State<AppState>,
+) -> Result<(), String> {
     state
         .db
         .assign_group_name(group_id, &name)
@@ -279,12 +303,16 @@ fn ignore_face_group(group_id: i64, state: State<AppState>) -> Result<(), String
 
 #[tauri::command]
 fn separate_face_from_group(face_id: i64, state: State<AppState>) -> Result<(), String> {
-    state.db.separate_face_from_group(face_id).map_err(|e| e.to_string())
+    state
+        .db
+        .separate_face_from_group(face_id)
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 fn get_face_scan_stats(state: State<AppState>) -> Result<FaceScanProgressPayload, String> {
-    let (scanned, total, faces_found, groups_count) = state.db.get_face_scan_stats().map_err(|e| e.to_string())?;
+    let (scanned, total, faces_found, groups_count) =
+        state.db.get_face_scan_stats().map_err(|e| e.to_string())?;
     let percentage = if total > 0 {
         ((scanned as f64 / total as f64) * 100.0).round() as i32
     } else {
@@ -307,12 +335,31 @@ fn trigger_face_rescan(state: State<AppState>) -> Result<(), String> {
 }
 
 #[tauri::command]
-fn get_faces_for_media(file_path: String, state: State<AppState>) -> Result<Vec<FaceRecord>, String> {
-    state.db.get_faces_for_media(&file_path).map_err(|e| e.to_string())
+fn get_face_engine_enabled(state: State<AppState>) -> Result<bool, String> {
+    Ok(state.face_engine.is_enabled())
 }
 
 #[tauri::command]
-fn get_face_counts(state: State<AppState>) -> Result<std::collections::HashMap<String, i64>, String> {
+fn set_face_engine_enabled(enabled: bool, state: State<AppState>) -> Result<(), String> {
+    state.face_engine.set_enabled(enabled);
+    Ok(())
+}
+
+#[tauri::command]
+fn get_faces_for_media(
+    file_path: String,
+    state: State<AppState>,
+) -> Result<Vec<FaceRecord>, String> {
+    state
+        .db
+        .get_faces_for_media(&file_path)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn get_face_counts(
+    state: State<AppState>,
+) -> Result<std::collections::HashMap<String, i64>, String> {
     state.db.get_face_counts().map_err(|e| e.to_string())
 }
 
@@ -326,18 +373,28 @@ pub fn run() {
                 .join("RedCaso");
             let _ = std::fs::create_dir_all(&app_data_dir);
 
+            let is_scanning = Arc::new(AtomicBool::new(false));
             let db_path = app_data_dir.join("catalog.db");
             let database = Arc::new(Database::new(db_path).expect("Failed to initialize database"));
             let thumbnailer = Arc::new(Thumbnailer::new(app_data_dir.clone()));
 
-            // Launch background thumbnail worker paced at <5% CPU
-            Arc::clone(&thumbnailer).start_background_worker(Arc::clone(&database));
+            // Launch background thumbnail worker with is_scanning check
+            Arc::clone(&thumbnailer)
+                .start_background_worker(Arc::clone(&database), Arc::clone(&is_scanning));
 
-            let face_engine = Arc::new(FaceEngine::new(app_data_dir.clone()));
-            // Launch high-speed background face recognition & clustering worker
-            Arc::clone(&face_engine).start_background_worker(Arc::clone(&database), app.handle().clone());
+            let face_engine = Arc::new(FaceEngine::new(
+                app_data_dir.clone(),
+                Arc::clone(&is_scanning),
+            ));
+            // Launch background face recognition worker (defaults to OFF, yielding during scans)
+            Arc::clone(&face_engine)
+                .start_background_worker(Arc::clone(&database), app.handle().clone());
 
-            let scanner = Arc::new(Scanner::new(Arc::clone(&database), Arc::clone(&thumbnailer)));
+            let scanner = Arc::new(Scanner::new(
+                Arc::clone(&database),
+                Arc::clone(&thumbnailer),
+                Arc::clone(&is_scanning),
+            ));
             let sync_mgr = Arc::new(GooglePhotosSync::new(Arc::clone(&database)));
 
             app.manage(AppState {
@@ -346,6 +403,7 @@ pub fn run() {
                 scanner,
                 sync_mgr,
                 face_engine,
+                is_scanning,
             });
 
             Ok(())
@@ -371,6 +429,8 @@ pub fn run() {
             separate_face_from_group,
             get_face_scan_stats,
             trigger_face_rescan,
+            get_face_engine_enabled,
+            set_face_engine_enabled,
             get_faces_for_media,
             get_face_counts,
             reveal_in_explorer,

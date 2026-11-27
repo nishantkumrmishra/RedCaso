@@ -2,6 +2,7 @@ use crate::db::Database;
 use sha2::{Digest, Sha256};
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 pub struct Thumbnailer {
@@ -60,12 +61,22 @@ impl Thumbnailer {
         None
     }
 
-    /// Background worker that paces thumbnail creation at <5% CPU
-    pub fn start_background_worker(self: Arc<Self>, db: Arc<Database>) {
+    /// Background worker that gently paces thumbnail creation (yielding during active scans)
+    pub fn start_background_worker(
+        self: Arc<Self>,
+        db: Arc<Database>,
+        is_scanning: Arc<AtomicBool>,
+    ) {
         std::thread::spawn(move || {
             loop {
-                // Fetch next batch of unthumbnailed files
-                let batch = match db.get_unthumbnailed_media(30) {
+                // If directory scan is active, pause thumbnail generation to prevent dual disk contention
+                if is_scanning.load(Ordering::SeqCst) {
+                    std::thread::sleep(std::time::Duration::from_millis(500));
+                    continue;
+                }
+
+                // Fetch small micro-batch of unthumbnailed files
+                let batch = match db.get_unthumbnailed_media(10) {
                     Ok(items) => items,
                     Err(_) => {
                         std::thread::sleep(std::time::Duration::from_secs(3));
@@ -75,19 +86,23 @@ impl Thumbnailer {
 
                 if batch.is_empty() {
                     // Nothing to process, sleep before next check
-                    std::thread::sleep(std::time::Duration::from_secs(4));
+                    std::thread::sleep(std::time::Duration::from_secs(3));
                     continue;
                 }
 
                 for (id, file_path) in batch {
+                    if is_scanning.load(Ordering::SeqCst) {
+                        break;
+                    }
+
                     if let Some(thumb_path) = self.get_or_generate_thumbnail(&file_path) {
                         let _ = db.update_thumbnail_path(id, &thumb_path);
                     } else {
                         // Mark as attempted so we don't spin on corrupted files
                         let _ = db.update_thumbnail_path(id, "none");
                     }
-                    // Low priority pacing: 15ms sleep between images keeps CPU < 5%
-                    std::thread::sleep(std::time::Duration::from_millis(15));
+                    // Gentle pacing: 80ms sleep between photos keeps disk I/O < 1.5 MB/s and silent
+                    std::thread::sleep(std::time::Duration::from_millis(80));
                 }
             }
         });

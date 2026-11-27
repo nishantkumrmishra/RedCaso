@@ -26,6 +26,8 @@ interface ModernTopBarProps {
   onToggleTheme?: () => void;
   onOpenInfo?: () => void;
   onAddFolder?: () => void;
+  isFaceEngineEnabled?: boolean;
+  onToggleFaceEngine?: () => void;
 }
 
 export const ModernTopBar: React.FC<ModernTopBarProps> = ({
@@ -37,6 +39,8 @@ export const ModernTopBar: React.FC<ModernTopBarProps> = ({
   libraryStatus = 'Library up to date',
   onOpenInfo,
   onAddFolder,
+  isFaceEngineEnabled = false,
+  onToggleFaceEngine,
 }) => {
   const [isMaximized, setIsMaximized] = useState(false);
   const [showMoreMenu, setShowMoreMenu] = useState(false);
@@ -165,14 +169,30 @@ export const ModernTopBar: React.FC<ModernTopBarProps> = ({
             <span>New album</span>
           </button>
 
-          {/* Find faces Button */}
+          {/* Face Recognition Toggle Button */}
           <button
             type="button"
-            onClick={onFindFaces}
-            className="h-[34px] px-3 border border-transparent hover:border-[#D8D8D8] hover:bg-white text-[#242424] rounded-[4px] flex items-center space-x-1.5 transition-colors cursor-pointer"
+            onClick={onToggleFaceEngine || onFindFaces}
+            className={`h-[34px] px-3 border rounded-[4px] flex items-center space-x-2 transition-all cursor-pointer shadow-2xs ${
+              isFaceEngineEnabled
+                ? 'bg-[#EBF3FB] border-[#0067C0] text-[#0067C0]'
+                : 'bg-white border-[#D8D8D8] text-[#555555] hover:bg-[#F5F5F5]'
+            }`}
+            title={
+              isFaceEngineEnabled
+                ? 'Face recognition is Active (Click to pause and save disk)'
+                : 'Face recognition is Paused (Click to enable)'
+            }
           >
-            <Users size={14} className="text-[#0067C0]" />
-            <span>Find faces</span>
+            <Users size={14} className={isFaceEngineEnabled ? 'text-[#0067C0]' : 'text-[#777777]'} />
+            <span className="font-medium">
+              Faces: {isFaceEngineEnabled ? 'On' : 'Off'}
+            </span>
+            <span
+              className={`w-2 h-2 rounded-full ${
+                isFaceEngineEnabled ? 'bg-[#107C41] animate-pulse' : 'bg-[#A0A0A0]'
+              }`}
+            />
           </button>
 
           {/* More options button */}

@@ -12,6 +12,8 @@ interface PeopleViewProps {
   onSelectMedia: (media: MediaRecord) => void;
   isScanning?: boolean;
   isDark?: boolean;
+  isFaceEngineEnabled?: boolean;
+  onToggleFaceEngine?: () => void;
 }
 
 interface NewPersonDialogState {
@@ -32,6 +34,8 @@ export const PeopleView: React.FC<PeopleViewProps> = ({
   onSelectMedia,
   isScanning: _isScanning = false,
   isDark = false,
+  isFaceEngineEnabled = false,
+  onToggleFaceEngine,
 }) => {
   const [faceGroups, setFaceGroups] = useState<FaceGroupRecord[]>([]);
   const [faces, setFaces] = useState<FaceRecord[]>([]);
@@ -529,6 +533,24 @@ export const PeopleView: React.FC<PeopleViewProps> = ({
             <RefreshCw size={12} className={_isScanning ? 'animate-spin' : ''} />
             <span>Rescan faces</span>
           </button>
+
+          {onToggleFaceEngine && (
+            <button
+              type="button"
+              onClick={onToggleFaceEngine}
+              className={`px-3 py-1.5 text-xs font-normal border flex items-center space-x-1.5 transition-colors cursor-pointer ${
+                isFaceEngineEnabled
+                  ? 'bg-[#0078D4] text-white border-[#0078D4]'
+                  : isDark
+                  ? 'border-[#333333] hover:bg-[#252525] text-[#AAAAAA]'
+                  : 'border-[#CBD5E1] hover:bg-[#F1F5F9] text-[#64748B]'
+              }`}
+              title="Toggle face recognition engine on or off to control disk activity"
+            >
+              <User size={12} className={isFaceEngineEnabled ? 'text-white' : ''} />
+              <span>Face Engine: {isFaceEngineEnabled ? 'On' : 'Paused'}</span>
+            </button>
+          )}
         </div>
       </div>
 
@@ -1328,3 +1350,5 @@ export const PeopleView: React.FC<PeopleViewProps> = ({
     </div>
   );
 };
+
+

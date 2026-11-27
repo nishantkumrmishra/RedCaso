@@ -97,54 +97,58 @@ impl Database {
             "PRAGMA journal_mode = WAL;
              PRAGMA synchronous = NORMAL;
 
-             CREATE TABLE IF NOT EXISTS folders (
-                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                 folder_path TEXT UNIQUE NOT NULL,
-                 folder_name TEXT NOT NULL,
-                 photo_count INTEGER DEFAULT 0,
-                 sync_enabled BOOLEAN DEFAULT 0,
-                 google_album_id TEXT,
-                 last_scanned_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+             CREATE TABLE IF NOT EXISTS folders (\n                  id INTEGER PRIMARY KEY AUTOINCREMENT,
+                  folder_path TEXT UNIQUE NOT NULL,
+                  folder_name TEXT NOT NULL,
+                  photo_count INTEGER DEFAULT 0,
+                  sync_enabled BOOLEAN DEFAULT 0,
+                  google_album_id TEXT,
+                  last_scanned_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
              );
 
              CREATE TABLE IF NOT EXISTS media_files (
-                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                 folder_id INTEGER NOT NULL REFERENCES folders(id) ON DELETE CASCADE,
-                 file_path TEXT UNIQUE NOT NULL,
-                 file_name TEXT NOT NULL,
-                 file_size INTEGER NOT NULL,
-                 file_hash TEXT NOT NULL,
-                 width INTEGER,
-                 height INTEGER,
-                 date_taken TEXT,
-                 thumbnail_path TEXT,
-                 sync_status TEXT DEFAULT 'local',
-                 character_tag TEXT,
-                 face_scanned BOOLEAN DEFAULT 0,
-                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                  id INTEGER PRIMARY KEY AUTOINCREMENT,
+                  folder_id INTEGER NOT NULL REFERENCES folders(id) ON DELETE CASCADE,
+                  file_path TEXT UNIQUE NOT NULL,
+                  file_name TEXT NOT NULL,
+                  file_size INTEGER NOT NULL,
+                  file_hash TEXT NOT NULL,
+                  width INTEGER,
+                  height INTEGER,
+                  date_taken TEXT,
+                  thumbnail_path TEXT,
+                  sync_status TEXT DEFAULT 'local',
+                  character_tag TEXT,
+                  face_scanned BOOLEAN DEFAULT 0,
+                  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
              );
 
              CREATE TABLE IF NOT EXISTS faces (
-                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                 media_id INTEGER NOT NULL REFERENCES media_files(id) ON DELETE CASCADE,
-                 file_path TEXT NOT NULL,
-                 crop_path TEXT NOT NULL,
-                 box_x INTEGER NOT NULL,
-                 box_y INTEGER NOT NULL,
-                 box_w INTEGER NOT NULL,
-                 box_h INTEGER NOT NULL,
-                 person_name TEXT,
-                 group_id INTEGER DEFAULT 0,
-                 is_ignored BOOLEAN DEFAULT 0,
-                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                  id INTEGER PRIMARY KEY AUTOINCREMENT,
+                  media_id INTEGER NOT NULL REFERENCES media_files(id) ON DELETE CASCADE,
+                  file_path TEXT NOT NULL,
+                  crop_path TEXT NOT NULL,
+                  box_x INTEGER NOT NULL,
+                  box_y INTEGER NOT NULL,
+                  box_w INTEGER NOT NULL,
+                  box_h INTEGER NOT NULL,
+                  person_name TEXT,
+                  group_id INTEGER DEFAULT 0,
+                  is_ignored BOOLEAN DEFAULT 0,
+                  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
              );
-
              ",
         )?;
 
         // Ensure columns exist on older databases before creating indexes
-        let _ = conn.execute("ALTER TABLE media_files ADD COLUMN face_scanned BOOLEAN DEFAULT 0;", []);
-        let _ = conn.execute("ALTER TABLE faces ADD COLUMN group_id INTEGER DEFAULT 0;", []);
+        let _ = conn.execute(
+            "ALTER TABLE media_files ADD COLUMN face_scanned BOOLEAN DEFAULT 0;",
+            [],
+        );
+        let _ = conn.execute(
+            "ALTER TABLE faces ADD COLUMN group_id INTEGER DEFAULT 0;",
+            [],
+        );
 
         // Create indexes safely after ensuring all columns exist
         conn.execute_batch(
@@ -159,7 +163,6 @@ impl Database {
             ",
         )?;
 
-
         Ok(())
     }
 
@@ -170,7 +173,7 @@ impl Database {
              DELETE FROM media_files;
              DELETE FROM folders;
              VACUUM;
-            "
+            ",
         )?;
         Ok(())
     }
@@ -204,7 +207,7 @@ impl Database {
         let tx = conn.transaction()?;
         {
             let mut stmt = tx.prepare(
-                "INSERT OR IGNORE INTO media_files 
+                "INSERT OR IGNORE INTO media_files
                  (folder_id, file_path, file_name, file_size, file_hash, width, height, date_taken)
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
             )?;
@@ -233,8 +236,8 @@ impl Database {
     pub fn get_all_folders(&self) -> Result<Vec<FolderRecord>> {
         let conn = self.get_conn()?;
         let mut stmt = conn.prepare(
-            "SELECT id, folder_path, folder_name, photo_count, sync_enabled, google_album_id, last_scanned_at 
-             FROM folders 
+            "SELECT id, folder_path, folder_name, photo_count, sync_enabled, google_album_id, last_scanned_at
+             FROM folders
              ORDER BY folder_name ASC",
         )?;
 
@@ -289,10 +292,7 @@ impl Database {
             "DELETE FROM media_files WHERE file_path = ?1",
             params![file_path],
         )?;
-        let _ = conn.execute(
-            "DELETE FROM faces WHERE file_path = ?1",
-            params![file_path],
-        );
+        let _ = conn.execute("DELETE FROM faces WHERE file_path = ?1", params![file_path]);
         Ok(())
     }
 
@@ -435,9 +435,7 @@ impl Database {
              LIMIT ?1",
         )?;
 
-        let rows = stmt.query_map(params![limit], |row| {
-            Ok((row.get(0)?, row.get(1)?))
-        })?;
+        let rows = stmt.query_map(params![limit], |row| Ok((row.get(0)?, row.get(1)?)))?;
 
         let mut list = Vec::new();
         for r in rows {
@@ -510,7 +508,8 @@ impl Database {
         let conn = self.get_conn()?;
         let mut stmt = conn.prepare(
             "SELECT id, file_path, thumbnail_path FROM media_files
-             WHERE face_scanned = 0 OR face_scanned IS NULL
+             WHERE (face_scanned = 0 OR face_scanned IS NULL)
+               AND thumbnail_path IS NOT NULL AND thumbnail_path != '' AND thumbnail_path != 'none'
              ORDER BY id ASC
              LIMIT ?1",
         )?;
@@ -616,7 +615,8 @@ impl Database {
             })
         })?;
 
-        let mut map: std::collections::HashMap<i64, Vec<FaceRecord>> = std::collections::HashMap::new();
+        let mut map: std::collections::HashMap<i64, Vec<FaceRecord>> =
+            std::collections::HashMap::new();
         for f in face_rows {
             if let Ok(item) = f {
                 map.entry(item.group_id).or_default().push(item);
@@ -641,11 +641,13 @@ impl Database {
         )?;
 
         // 2. Also tag parent photo in media_files
-        let media_id: Option<i64> = conn.query_row(
-            "SELECT media_id FROM faces WHERE id = ?1",
-            params![face_id],
-            |row| row.get(0),
-        ).ok();
+        let media_id: Option<i64> = conn
+            .query_row(
+                "SELECT media_id FROM faces WHERE id = ?1",
+                params![face_id],
+                |row| row.get(0),
+            )
+            .ok();
 
         if let Some(mid) = media_id {
             let _ = conn.execute(
@@ -667,7 +669,7 @@ impl Database {
 
         // 2. Tag all parent media files for this group
         let _ = conn.execute(
-            "UPDATE media_files SET character_tag = ?1 
+            "UPDATE media_files SET character_tag = ?1
              WHERE id IN (SELECT media_id FROM faces WHERE group_id = ?2)",
             params![name, group_id],
         );
@@ -696,8 +698,8 @@ impl Database {
     pub fn separate_face_from_group(&self, face_id: i64) -> Result<()> {
         let conn = self.get_conn()?;
         conn.execute(
-            "UPDATE faces 
-             SET group_id = (SELECT COALESCE(MAX(group_id), 0) + 1 FROM faces) 
+            "UPDATE faces
+             SET group_id = (SELECT COALESCE(MAX(group_id), 0) + 1 FROM faces)
              WHERE id = ?1",
             params![face_id],
         )?;
@@ -706,7 +708,8 @@ impl Database {
 
     pub fn get_face_scan_stats(&self) -> Result<(i64, i64, i64, i64)> {
         let conn = self.get_conn()?;
-        let total: i64 = conn.query_row("SELECT COUNT(*) FROM media_files", [], |row| row.get(0))?;
+        let total: i64 =
+            conn.query_row("SELECT COUNT(*) FROM media_files", [], |row| row.get(0))?;
         let scanned: i64 = conn.query_row(
             "SELECT COUNT(*) FROM media_files WHERE face_scanned = 1",
             [],
@@ -730,7 +733,7 @@ impl Database {
         conn.execute_batch(
             "DELETE FROM faces;
              UPDATE media_files SET face_scanned = 0;
-            "
+            ",
         )?;
         Ok(())
     }
@@ -782,4 +785,3 @@ impl Database {
         Ok(map)
     }
 }
-

@@ -40,9 +40,10 @@ export default function App() {
   // Settings Modal
   const [isSettingsOpen, setIsSettingsOpen] = useState<boolean>(false);
 
-  // Face recognition stats
+  // Face recognition stats & user toggle
   const [faceCount, setFaceCount] = useState<number>(0);
   const [facePercentage, setFacePercentage] = useState<number>(100);
+  const [faceEngineEnabled, setFaceEngineEnabled] = useState<boolean>(false);
 
   // Dialog hook
   const { prompt } = useFluentDialog();
@@ -98,6 +99,32 @@ export default function App() {
   useEffect(() => {
     loadMedia();
   }, [loadMedia]);
+
+  // Load initial face engine enabled status
+  useEffect(() => {
+    invoke<boolean>('get_face_engine_enabled')
+      .then(setFaceEngineEnabled)
+      .catch(() => {});
+  }, []);
+
+  // Toggle face engine worker
+  const handleToggleFaceEngine = async () => {
+    const next = !faceEngineEnabled;
+    try {
+      await invoke('set_face_engine_enabled', { enabled: next });
+      setFaceEngineEnabled(next);
+      if (next) {
+        invoke<FaceScanProgressPayload>('get_face_scan_stats')
+          .then((stats) => {
+            setFaceCount(stats.faces_found);
+            setFacePercentage(stats.percentage || 100);
+          })
+          .catch(() => {});
+      }
+    } catch (err) {
+      console.error('Failed to toggle face engine:', err);
+    }
+  };
 
   // Debounced loadMedia to prevent IPC floods when streaming scanned folders
   const loadMediaDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -275,11 +302,15 @@ export default function App() {
         onTriggerScan={() => handleTriggerScan()}
         onFindFaces={() => {
           setActiveTab('people');
-          invoke('trigger_face_rescan').catch(() => {});
+          if (!faceEngineEnabled) {
+            handleToggleFaceEngine();
+          }
         }}
         isScanning={isScanning}
         onAddFolder={handleAddFolder}
         onOpenInfo={() => setIsSettingsOpen(true)}
+        isFaceEngineEnabled={faceEngineEnabled}
+        onToggleFaceEngine={handleToggleFaceEngine}
       />
 
       {/* 2. Workspace: Sidebar + Full-Area Canvas + Right Inspector */}
@@ -309,7 +340,7 @@ export default function App() {
           onOpenSettings={() => setIsSettingsOpen(true)}
           faceCount={faceCount}
           facePercentage={facePercentage}
-          isFaceScanning={facePercentage < 100 && media.length > 0}
+          isFaceScanning={facePercentage < 100 && media.length > 0 && faceEngineEnabled}
         />
 
         {/* Main Content Area: Fills 100% of remaining width */}
@@ -324,6 +355,8 @@ export default function App() {
               }}
               isScanning={isScanning}
               isDark={false}
+              isFaceEngineEnabled={faceEngineEnabled}
+              onToggleFaceEngine={handleToggleFaceEngine}
             />
           ) : (
             <ModernGallery
@@ -436,7 +469,10 @@ export default function App() {
           loadCatalog();
           loadMedia();
         }}
+        isFaceEngineEnabled={faceEngineEnabled}
+        onToggleFaceEngine={handleToggleFaceEngine}
       />
     </div>
   );
 }
+

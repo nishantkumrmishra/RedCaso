@@ -19,6 +19,8 @@ interface SettingsModalProps {
   folders: FolderRecord[];
   onAddFolder: () => void;
   onRefresh: () => void;
+  isFaceEngineEnabled?: boolean;
+  onToggleFaceEngine?: () => void;
 }
 
 export const SettingsModal: React.FC<SettingsModalProps> = ({
@@ -27,6 +29,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   folders,
   onAddFolder,
   onRefresh,
+  isFaceEngineEnabled = false,
+  onToggleFaceEngine,
 }) => {
   const [activeSection, setActiveSection] = useState<'folders' | 'faces' | 'maintenance'>('folders');
   const [faceStats, setFaceStats] = useState<FaceScanProgressPayload | null>(null);
@@ -99,7 +103,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           <div className="flex items-center space-x-2.5">
             <h2 className="text-base text-[#111827]">Settings</h2>
             <span className="text-[11px] text-[#767676] px-2 py-0.5 rounded bg-[#F0F0F0]">
-              v1.0.0
+              v1.5.0
             </span>
           </div>
           <button
@@ -120,10 +124,10 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             className={`py-2.5 px-3 border-b-2 cursor-pointer transition-colors ${
               activeSection === 'folders'
                 ? 'border-[#0067C0] text-[#0067C0]'
-                : 'border-transparent text-[#616161] hover:text-[#242424]'
+                : 'border-transparent text-[#616161] hover:text-[#111827]'
             }`}
           >
-            Indexed Folders ({folders.length})
+            Indexed Folders
           </button>
           <button
             type="button"
@@ -131,7 +135,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             className={`py-2.5 px-3 border-b-2 cursor-pointer transition-colors ${
               activeSection === 'faces'
                 ? 'border-[#0067C0] text-[#0067C0]'
-                : 'border-transparent text-[#616161] hover:text-[#242424]'
+                : 'border-transparent text-[#616161] hover:text-[#111827]'
             }`}
           >
             Face Recognition
@@ -142,22 +146,22 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             className={`py-2.5 px-3 border-b-2 cursor-pointer transition-colors ${
               activeSection === 'maintenance'
                 ? 'border-[#0067C0] text-[#0067C0]'
-                : 'border-transparent text-[#616161] hover:text-[#242424]'
+                : 'border-transparent text-[#616161] hover:text-[#111827]'
             }`}
           >
-            Maintenance & Storage
+            Performance & Database
           </button>
         </div>
 
-        {/* Modal Body */}
-        <div className="flex-1 overflow-y-auto p-5 text-xs space-y-4">
+        {/* Modal Content */}
+        <div className="flex-1 overflow-y-auto p-5 text-xs">
           {activeSection === 'folders' && (
             <div className="space-y-4">
               <div className="flex items-center justify-between">
                 <div>
-                  <h3 className="text-sm text-[#111827]">Monitored PC Folders</h3>
+                  <h3 className="text-sm text-[#111827]">Watched Photo Directories</h3>
                   <p className="text-[11px] text-[#616161] mt-0.5">
-                    RedCaso monitors these locations for photos and automatically indexes changes.
+                    RedCaso monitors these local folders and discovers new photos in the background.
                   </p>
                 </div>
                 <button
@@ -165,36 +169,37 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   onClick={onAddFolder}
                   className="h-[30px] px-3 bg-[#0067C0] hover:bg-[#005A9E] text-white rounded-[4px] flex items-center space-x-1.5 transition-colors cursor-pointer shadow-2xs"
                 >
-                  <Plus size={14} />
+                  <Plus size={13} />
                   <span>Add Folder</span>
                 </button>
               </div>
 
-              <div className="border border-[#E5E5E5] rounded-[6px] divide-y divide-[#E5E5E5] max-h-[300px] overflow-y-auto bg-white">
+              <div className="divide-y divide-[#EAEAEA] border border-[#E5E5E5] rounded-[6px] bg-white overflow-hidden">
                 {folders.length === 0 ? (
-                  <div className="p-6 text-center text-[#767676] text-xs">
-                    No folders indexed yet. Click &quot;Add Folder&quot; above to select a folder.
+                  <div className="p-6 text-center text-[#767676]">
+                    No custom folders configured.
                   </div>
                 ) : (
                   folders.map((folder) => (
                     <div
                       key={folder.id}
-                      className="px-3.5 py-2.5 flex items-center justify-between hover:bg-[#F9F9F9] transition-colors"
+                      className="p-3 flex items-center justify-between hover:bg-[#F9F9F9] transition-colors"
                     >
-                      <div className="flex items-center space-x-3 truncate mr-3">
+                      <div className="flex items-center space-x-2.5 min-w-0">
                         <Folder size={16} className="text-[#0067C0] shrink-0" />
-                        <div className="truncate">
+                        <div className="min-w-0">
                           <span className="text-xs text-[#242424] block truncate">
                             {folder.folder_name}
                           </span>
-                          <span className="text-[10px] text-[#767676] truncate block" title={folder.folder_path}>
+                          <span className="text-[11px] text-[#767676] block truncate">
                             {folder.folder_path}
                           </span>
                         </div>
                       </div>
-                      <div className="flex items-center space-x-3 shrink-0">
-                        <span className="text-[11px] text-[#616161] px-2 py-0.5 rounded bg-[#F0F0F0]">
-                          {folder.photo_count} photos
+
+                      <div className="flex items-center space-x-3 shrink-0 ml-4">
+                        <span className="text-[11px] text-[#767676]">
+                          {folder.photo_count.toLocaleString()} photos
                         </span>
                         <button
                           type="button"
@@ -219,6 +224,34 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 <p className="text-[11px] text-[#616161] mt-0.5">
                   128-dimensional spherical gradient embeddings powered by on-device SeetaFace.
                 </p>
+              </div>
+
+              {/* Master On/Off Toggle */}
+              <div className="p-3.5 bg-white border border-[#E5E5E5] rounded-[6px] flex items-center justify-between shadow-2xs">
+                <div>
+                  <span className="text-xs text-[#242424] font-medium block">
+                    Background Face Recognition
+                  </span>
+                  <span className="text-[11px] text-[#767676] block mt-0.5">
+                    {isFaceEngineEnabled
+                      ? 'Active: analyzing faces on cached thumbnails only when computer is idle.'
+                      : 'Paused: consumes 0% CPU and 0 MB/s disk to prevent disk noise and computer vibration.'}
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  onClick={onToggleFaceEngine}
+                  className={`w-12 h-6 rounded-full transition-colors relative cursor-pointer ${
+                    isFaceEngineEnabled ? 'bg-[#0067C0]' : 'bg-[#D1D1D1]'
+                  }`}
+                  title="Toggle background face recognition"
+                >
+                  <span
+                    className={`absolute top-0.5 w-5 h-5 rounded-full bg-white shadow-xs transition-all ${
+                      isFaceEngineEnabled ? 'left-[26px]' : 'left-0.5'
+                    }`}
+                  />
+                </button>
               </div>
 
               <div className="grid grid-cols-3 gap-3">
@@ -282,11 +315,10 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               <div className="p-3 bg-white border border-[#E5E5E5] rounded-[6px] space-y-2">
                 <div className="flex items-center space-x-2 text-xs text-[#242424]">
                   <Cpu size={14} className="text-[#0067C0]" />
-                  <span>Low-Resource Pacing Mode Active</span>
+                  <span>Picasa 3 Low-Resource Architecture Active</span>
                 </div>
                 <p className="text-[11px] text-[#616161]">
-                  Background scanner sleeps 20ms between photos, throttling disk I/O to &lt;2 MB/s
-                  and CPU usage to &lt;4% to prevent system slowdowns.
+                  Directory crawler performs metadata-only reads (&lt;0.5 MB/s). Background thumbnailer and face detector never run at the same time and strictly yield during active disk operations.
                 </p>
               </div>
 
@@ -298,36 +330,25 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                       Reset & Clear Catalog Database
                     </span>
                     <span className="text-[11px] text-red-600/80 leading-relaxed block mt-0.5">
-                      Clears all cataloged photos, indexed directories, and face records from SQLite.
-                      Your original photo files on disk will NOT be modified or deleted.
+                      Clears all indexed photo listings, folders, and face recognition records from
+                      the local cache. Your original photo files on your disk will NOT be modified or deleted.
                     </span>
                   </div>
                 </div>
 
-                <div className="flex justify-end">
+                <div className="pt-1">
                   <button
                     type="button"
                     onClick={handleClearDatabase}
                     disabled={isClearing}
-                    className="h-[30px] px-3 bg-red-600 hover:bg-red-700 text-white rounded-[4px] flex items-center space-x-1.5 transition-colors cursor-pointer text-xs"
+                    className="h-[30px] px-3 bg-red-600 hover:bg-red-700 text-white rounded-[4px] transition-colors cursor-pointer disabled:opacity-50"
                   >
-                    <span>{isClearing ? 'Clearing...' : 'Clear Catalog Database'}</span>
+                    {isClearing ? 'Clearing Catalog...' : 'Clear Catalog Database'}
                   </button>
                 </div>
               </div>
             </div>
           )}
-        </div>
-
-        {/* Modal Footer */}
-        <div className="h-[48px] px-5 border-t border-[#E5E5E5] flex items-center justify-end bg-[#F9F9F9] shrink-0">
-          <button
-            type="button"
-            onClick={onClose}
-            className="h-[30px] px-4 bg-white border border-[#D1D1D1] hover:bg-[#F5F5F5] text-[#242424] rounded-[4px] text-xs transition-colors cursor-pointer"
-          >
-            Done
-          </button>
         </div>
       </div>
     </div>
